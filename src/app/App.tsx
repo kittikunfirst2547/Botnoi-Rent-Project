@@ -215,9 +215,7 @@ export default function App() {
               ที่ช่วยแนะนำสถานที่ท่องเที่ยวให้คุณ
             </p>
           </motion.div>
-
           <SearchBar />
-
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
