@@ -208,7 +208,7 @@ export default function App() {
               className="mb-3 text-black dark:text-white text-5xl font-semibold transition-colors duration-300"
               style={{ fontFamily: "var(--font-display)", lineHeight: "1.2" }}
             >
-              ค้นหาที่พักของคุณ
+              ค้นหาที่พักของคุณขเองคุณได้ง่ายๆ ด้วย Javis AI Assistant
             </h2>
             <p className="text-lg text-gray-500 dark:text-gray-400 transition-colors duration-300">
               จองโรงแรมง่ายๆ ด้วย AI Assistant
