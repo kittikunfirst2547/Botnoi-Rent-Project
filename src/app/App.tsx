@@ -8,6 +8,9 @@ import { BookingModal } from "./components/BookingModal";
 import { BotnoiChat } from "./components/BotnoiChat";
 import { BookingChoiceModal } from "./components/BookingChoiceModal";
 import { VoiceBookingCallModal } from "./components/VoiceBookingCallModal";
+import { PromotionsPage } from "./components/PromotionsPage";
+import { ContactPage } from "./components/ContactPage";
+import { AboutPage } from "./components/AboutPage";
 
 const hotels = [
   {
@@ -87,6 +90,25 @@ export default function App() {
     }
     return false;
   });
+  const [currentPage, setCurrentPage] = useState<"home" | "promotions" | "about" | "contact">(() => {
+    const hash = window.location.hash.replace("#", "");
+    if (hash === "promotions") return "promotions";
+    if (hash === "about") return "about";
+    if (hash === "contact") return "contact";
+    return "home";
+  });
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace("#", "");
+      if (hash === "promotions") setCurrentPage("promotions");
+      else if (hash === "about") setCurrentPage("about");
+      else if (hash === "contact") setCurrentPage("contact");
+      else setCurrentPage("home");
+    };
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -143,26 +165,26 @@ export default function App() {
               <div className="flex items-center space-x-8">
                 <nav className="flex space-x-8">
                   <a
-                    href="#"
-                    className="text-sm font-medium text-black dark:text-white hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                    href="#home"
+                    className={`text-sm font-medium transition-colors ${currentPage === "home" ? "text-black dark:text-white" : "text-gray-500 dark:text-gray-400 hover:text-black dark:hover:text-white"}`}
                   >
                     โรงแรม
                   </a>
                   <a
-                    href="#"
-                    className="text-sm font-medium text-gray-500 dark:text-gray-400 hover:text-black dark:hover:text-white transition-colors"
+                    href="#promotions"
+                    className={`text-sm font-medium transition-colors ${currentPage === "promotions" ? "text-black dark:text-white" : "text-gray-500 dark:text-gray-400 hover:text-black dark:hover:text-white"}`}
                   >
                     โปรโมชัน
                   </a>
                   <a
-                    href="#"
-                    className="text-sm font-medium text-gray-500 dark:text-gray-400 hover:text-black dark:hover:text-white transition-colors"
+                    href="#about"
+                    className={`text-sm font-medium transition-colors ${currentPage === "about" ? "text-black dark:text-white" : "text-gray-500 dark:text-gray-400 hover:text-black dark:hover:text-white"}`}
                   >
                     เกี่ยวกับเรา
                   </a>
                   <a
-                    href="#"
-                    className="text-sm font-medium text-gray-500 dark:text-gray-400 hover:text-black dark:hover:text-white transition-colors"
+                    href="#contact"
+                    className={`text-sm font-medium transition-colors ${currentPage === "contact" ? "text-black dark:text-white" : "text-gray-500 dark:text-gray-400 hover:text-black dark:hover:text-white"}`}
                   >
                     ติดต่อเรา
                   </a>
@@ -205,54 +227,95 @@ export default function App() {
           </motion.div>
         </header>
 
-        <section className="relative z-10 max-w-7xl mx-auto px-8 py-12">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="mb-10 text-center"
-          >
-            <h2
-              className="mb-3 text-black dark:text-white text-5xl font-semibold transition-colors duration-300"
-              style={{ fontFamily: "var(--font-display)", lineHeight: "1.2" }}
+        <AnimatePresence mode="wait">
+          {currentPage === "home" ? (
+            <motion.section
+              key="home"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.3 }}
+              className="relative z-10 max-w-7xl mx-auto px-8 py-12"
             >
-              ค้นหาที่พักของคุณของคุณได้ง่ายๆ ด้วย Javis AI Assistant
-            </h2>
-            <p className="text-lg text-gray-500 dark:text-gray-400 transition-colors duration-300">
-              จองโรงแรมง่ายๆ ด้วย AI Assistant
-              ที่ช่วยแนะนำสถานที่ท่องเที่ยวให้คุณ
-            </p>
-          </motion.div>
-          <SearchBar />
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.3 }}
-            className="mt-16"
-          >
-            <div className="flex items-center justify-between mb-8">
-              <h3
-                className="text-black dark:text-white text-3xl font-semibold transition-colors duration-300"
-                style={{ fontFamily: "var(--font-display)" }}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+                className="mb-10 text-center"
               >
-                โรงแรมแนะนำ
-              </h3>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {hotels.map((hotel, index) => (
-                <motion.div
-                  key={hotel.id}
-                  initial={{ opacity: 0, y: 30 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.4 + index * 0.1 }}
+                <h2
+                  className="mb-3 text-black dark:text-white text-5xl font-semibold transition-colors duration-300"
+                  style={{ fontFamily: "var(--font-display)", lineHeight: "1.2" }}
                 >
-                  <HotelCard {...hotel} onBook={handleBooking} />
-                </motion.div>
-              ))}
-            </div>
-          </motion.div>
-        </section>
+                  ค้นหาที่พักของคุณของคุณได้ง่ายๆ ด้วย Javis AI Assistant
+                </h2>
+                <p className="text-lg text-gray-500 dark:text-gray-400 transition-colors duration-300">
+                  จองโรงแรมง่ายๆ ด้วย AI Assistant
+                  ที่ช่วยแนะนำสถานที่ท่องเที่ยวให้คุณ
+                </p>
+              </motion.div>
+              <SearchBar />
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.3 }}
+                className="mt-16"
+              >
+                <div className="flex items-center justify-between mb-8">
+                  <h3
+                    className="text-black dark:text-white text-3xl font-semibold transition-colors duration-300"
+                    style={{ fontFamily: "var(--font-display)" }}
+                  >
+                    โรงแรมแนะนำ
+                  </h3>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {hotels.map((hotel, index) => (
+                    <motion.div
+                      key={hotel.id}
+                      initial={{ opacity: 0, y: 30 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.4 + index * 0.1 }}
+                    >
+                      <HotelCard {...hotel} onBook={handleBooking} />
+                    </motion.div>
+                  ))}
+                </div>
+              </motion.div>
+            </motion.section>
+          ) : currentPage === "promotions" ? (
+            <motion.div
+              key="promotions"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.3 }}
+            >
+              <PromotionsPage />
+            </motion.div>
+          ) : currentPage === "about" ? (
+            <motion.div
+              key="about"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.3 }}
+            >
+              <AboutPage />
+            </motion.div>
+          ) : (
+            <motion.div
+              key="contact"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ duration: 0.3 }}
+            >
+              <ContactPage />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <footer className="relative z-10 mt-24 border-t border-gray-200 dark:border-gray-800 transition-colors duration-300">
           <div className="max-w-7xl mx-auto px-8 py-12">
@@ -306,7 +369,7 @@ export default function App() {
                 <ul className="space-y-2 text-sm text-gray-500 dark:text-gray-400">
                   <li>
                     <a
-                      href="#"
+                      href="#about"
                       className="hover:text-black dark:hover:text-white transition-colors"
                     >
                       เกี่ยวกับเรา
