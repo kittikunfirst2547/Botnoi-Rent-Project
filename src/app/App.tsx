@@ -6,6 +6,8 @@ import { HotelCard } from "./components/HotelCard";
 import { SearchBar } from "./components/SearchBar";
 import { BookingModal } from "./components/BookingModal";
 import { BotnoiChat } from "./components/BotnoiChat";
+import { BookingChoiceModal } from "./components/BookingChoiceModal";
+import { VoiceBookingCallModal } from "./components/VoiceBookingCallModal";
 
 const hotels = [
   {
@@ -78,6 +80,7 @@ const hotels = [
 
 export default function App() {
   const [selectedHotel, setSelectedHotel] = useState<string | null>(null);
+  const [bookingMode, setBookingMode] = useState<"choice" | "voice" | "form" | null>(null);
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window !== "undefined") {
       return localStorage.getItem("theme") === "dark";
@@ -98,9 +101,14 @@ export default function App() {
 
   const handleBooking = (hotelId: string) => {
     setSelectedHotel(hotelId);
+    setBookingMode("choice");
   };
 
   const selectedHotelData = hotels.find((h) => h.id === selectedHotel);
+  const closeBooking = () => {
+    setSelectedHotel(null);
+    setBookingMode(null);
+  };
 
   return (
     <div
@@ -366,12 +374,27 @@ export default function App() {
       <BotnoiChat />
 
       {selectedHotelData && (
-        <BookingModal
-          isOpen={!!selectedHotel}
-          onClose={() => setSelectedHotel(null)}
-          hotelName={selectedHotelData.name}
-          price={selectedHotelData.price}
-        />
+        <>
+          <BookingChoiceModal
+            isOpen={bookingMode === "choice"}
+            hotelName={selectedHotelData.name}
+            onClose={closeBooking}
+            onSelectVoice={() => setBookingMode("voice")}
+            onSelectForm={() => setBookingMode("form")}
+          />
+          <VoiceBookingCallModal
+            isOpen={bookingMode === "voice"}
+            onClose={closeBooking}
+            hotelName={selectedHotelData.name}
+            price={selectedHotelData.price}
+          />
+          <BookingModal
+            isOpen={bookingMode === "form"}
+            onClose={closeBooking}
+            hotelName={selectedHotelData.name}
+            price={selectedHotelData.price}
+          />
+        </>
       )}
     </div>
   );
