@@ -73,6 +73,7 @@ export function VoiceBookingAssistant() {
   const [voiceStatus, setVoiceStatus] = useState("พร้อมรับเสียงภาษาไทย");
   const [isSpeechUnavailable, setIsSpeechUnavailable] = useState(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const keepListeningRef = useRef(false);
   const handledSpeechErrorRef = useRef(false);
   const sessionId = useMemo(() => fallbackSessionId, []);
 
@@ -139,9 +140,10 @@ export function VoiceBookingAssistant() {
     }
 
     handledSpeechErrorRef.current = false;
+    keepListeningRef.current = true;
     const recognition = new SpeechRecognitionApi();
     recognition.lang = "th-TH";
-    recognition.continuous = false;
+    recognition.continuous = true;
     recognition.interimResults = false;
 
     recognition.onresult = (event) => {
@@ -151,12 +153,23 @@ export function VoiceBookingAssistant() {
       void sendToAssistant(transcript);
     };
     recognition.onend = () => {
-      setIsListening(false);
+      if (!keepListeningRef.current) {
+        setIsListening(false);
+        return;
+      }
+
+      try {
+        recognition.start();
+      } catch {
+        setIsListening(false);
+        keepListeningRef.current = false;
+      }
     };
     recognition.onerror = (event) => {
       if (handledSpeechErrorRef.current) return;
       handledSpeechErrorRef.current = true;
       setIsListening(false);
+      keepListeningRef.current = false;
 
       const replies: Record<SpeechRecognitionErrorEvent["error"], string> = {
         aborted: "การรับเสียงถูกยกเลิกค่ะ ลองกดไมค์อีกครั้งได้เลย",
@@ -185,6 +198,7 @@ export function VoiceBookingAssistant() {
   };
 
   const stopListening = () => {
+    keepListeningRef.current = false;
     recognitionRef.current?.stop();
     setIsListening(false);
     setVoiceStatus("หยุดรับเสียงแล้ว");
@@ -243,13 +257,26 @@ export function VoiceBookingAssistant() {
           onClick={isListening ? stopListening : startListening}
           disabled={isSending || isSpeechUnavailable}
           whileTap={{ scale: 0.98 }}
-          className={`flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-medium transition ${
+          animate={
             isListening
-              ? "bg-red-600 text-white hover:bg-red-700"
+              ? {
+                  boxShadow: [
+                    "0 0 0 0 rgba(35,165,90,0.52), 0 0 18px rgba(35,165,90,0.48)",
+                    "0 0 0 10px rgba(35,165,90,0), 0 0 26px rgba(35,165,90,0.65)",
+                    "0 0 0 0 rgba(35,165,90,0), 0 0 18px rgba(35,165,90,0.48)",
+                  ],
+                }
+              : { boxShadow: "0 0 0 0 rgba(35,165,90,0)" }
+          }
+          transition={{ repeat: isListening ? Infinity : 0, duration: 1.25, ease: "easeOut" }}
+          className={`relative flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-medium transition ${
+            isListening
+              ? "bg-[#23a55a] text-white hover:bg-[#1f944f]"
               : "bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black"
           } disabled:opacity-50`}
         >
-          {isListening ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+          {isListening && <span className="absolute left-1/2 top-1/2 h-9 w-9 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#23a55a]/60 shadow-[0_0_22px_rgba(35,165,90,0.72)]" />}
+          {isListening ? <MicOff className="relative h-5 w-5" /> : <Mic className="relative h-5 w-5" />}
           {isSpeechUnavailable ? "ใช้การพิมพ์แทนใน browser นี้" : isListening ? "กำลังฟัง..." : "กดเพื่อพูดกับ AI"}
         </motion.button>
 

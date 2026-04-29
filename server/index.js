@@ -1,14 +1,18 @@
-import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+import cors from "cors";
+import express from "express";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = join(__dirname, "..");
 const dataDir = join(__dirname, "data");
 const bookingsFile = join(dataDir, "bookings.json");
+const bookingsSqliteFile = join(dataDir, "bookings.sqlite");
+let bookingsDb;
 const sessions = new Map();
 
 function loadEnvFile() {
@@ -34,10 +38,12 @@ function loadEnvFile() {
 loadEnvFile();
 
 const botnoiConfig = {
-  apiBaseUrl: process.env.BOTNOI_API_BASE_URL ?? "",
+  apiBaseUrl: process.env.BOTNOI_API_BASE_URL ?? "https://api-voice.botnoi.ai/api/voicebot",
   apiUrl: process.env.BOTNOI_API_URL ?? "",
+  ttsUrl: process.env.BOTNOI_TTS_URL ?? "",
   token: process.env.BOTNOI_TOKEN ?? process.env.BOTNOI_API_KEY ?? "",
   botId: process.env.BOTNOI_BOT_ID ?? "69c39e5ab114409d08f2979a",
+  speakerId: process.env.BOTNOI_SPEAKER_ID ?? "523",
 };
 
 const hotels = [
@@ -60,12 +66,38 @@ const emptyBooking = () => ({
   status: "collecting",
 });
 
+function looksLikePlainCustomerName(text) {
+  const value = text.trim();
+  if (value.length < 2 || value.length > 60) return false;
+  if (/\d/.test(value)) return false;
+  if (/confirm|ok|yes|no/i.test(value)) return false;
+  return /^[A-Za-zก-๙\s.'-]+$/.test(value);
+}
+
 async function ensureDatabase() {
   await mkdir(dataDir, { recursive: true });
   try {
     await readFile(bookingsFile, "utf8");
   } catch {
     await writeFile(bookingsFile, "[]\n", "utf8");
+  }
+
+  if (!bookingsDb) {
+    bookingsDb = new DatabaseSync(bookingsSqliteFile);
+    bookingsDb.exec(`
+      CREATE TABLE IF NOT EXISTS bookings (
+        id TEXT PRIMARY KEY,
+        hotel_name TEXT NOT NULL,
+        location TEXT,
+        check_in TEXT NOT NULL,
+        check_out TEXT NOT NULL,
+        guests INTEGER NOT NULL,
+        customer_name TEXT NOT NULL,
+        phone TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    `);
   }
 }
 
@@ -80,6 +112,33 @@ async function saveBooking(booking) {
   };
   bookings.push(savedBooking);
   await writeFile(bookingsFile, `${JSON.stringify(bookings, null, 2)}\n`, "utf8");
+  bookingsDb
+    .prepare(
+      `INSERT INTO bookings (
+        id,
+        hotel_name,
+        location,
+        check_in,
+        check_out,
+        guests,
+        customer_name,
+        phone,
+        status,
+        created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      savedBooking.id,
+      savedBooking.hotelName,
+      savedBooking.location,
+      savedBooking.checkIn,
+      savedBooking.checkOut,
+      savedBooking.guests,
+      savedBooking.customerName,
+      savedBooking.phone,
+      savedBooking.status,
+      savedBooking.createdAt
+    );
   return savedBooking;
 }
 
@@ -102,7 +161,9 @@ function pickBotnoiReply(payload) {
 }
 
 async function askBotnoi({ message, sessionId, booking }) {
-  if (!botnoiConfig.apiUrl || !botnoiConfig.token) return "";
+  if (!botnoiConfig.apiUrl || !botnoiConfig.token) {
+    return "";
+  }
 
   const response = await fetch(botnoiConfig.apiUrl, {
     method: "POST",
@@ -135,6 +196,15 @@ function getBotnoiConfirmTemplateUrl() {
 
   if (!botnoiConfig.apiBaseUrl) return "";
   return `${botnoiConfig.apiBaseUrl.replace(/\/$/, "")}/confirm/create_template`;
+}
+
+function getBotnoiOutboundCallUrl() {
+  if (process.env.BOTNOI_OUTBOUND_CALL_URL) {
+    return process.env.BOTNOI_OUTBOUND_CALL_URL;
+  }
+
+  if (!botnoiConfig.apiBaseUrl) return "";
+  return `${botnoiConfig.apiBaseUrl.replace(/\/$/, "")}/confirm/call`;
 }
 
 async function createBotnoiConfirmTemplate(template) {
@@ -170,7 +240,141 @@ async function createBotnoiConfirmTemplate(template) {
   return payload;
 }
 
+async function sendBotnoiOutboundCall(payload) {
+  const url = getBotnoiOutboundCallUrl();
+  if (!url || !botnoiConfig.token) {
+    return {
+      skipped: true,
+      reason: "BOTNOI_OUTBOUND_CALL_URL or BOTNOI_API_BASE_URL and BOTNOI_TOKEN are required",
+    };
+  }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "botnoi-token": botnoiConfig.token,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const text = await response.text();
+  let result = text;
+  try {
+    result = JSON.parse(text);
+  } catch {
+    // Some APIs return plain text on errors.
+  }
+
+  if (!response.ok) {
+    throw new Error(`Botnoi outbound call API error: ${response.status} ${typeof result === "string" ? result : JSON.stringify(result)}`);
+  }
+
+  return result;
+}
+
+function pickBotnoiAudio(payload) {
+  if (!payload || typeof payload !== "object") return {};
+
+  const audioUrl =
+    payload.audio_url ??
+    payload.audioUrl ??
+    payload.url ??
+    payload.file_url ??
+    payload.fileUrl ??
+    payload.result?.audio_url ??
+    payload.result?.audioUrl ??
+    payload.result?.url ??
+    payload.data?.audio_url ??
+    payload.data?.audioUrl ??
+    payload.data?.url ??
+    "";
+
+  const audioBase64 =
+    payload.audio_base64 ??
+    payload.audioBase64 ??
+    payload.base64 ??
+    payload.audio ??
+    payload.result?.audio_base64 ??
+    payload.result?.audioBase64 ??
+    payload.result?.base64 ??
+    payload.result?.audio ??
+    payload.data?.audio_base64 ??
+    payload.data?.audioBase64 ??
+    payload.data?.base64 ??
+    payload.data?.audio ??
+    "";
+
+  const mimeType =
+    payload.mime_type ??
+    payload.mimeType ??
+    payload.result?.mime_type ??
+    payload.result?.mimeType ??
+    payload.data?.mime_type ??
+    payload.data?.mimeType ??
+    "audio/mpeg";
+
+  return { audioUrl, audioBase64, mimeType };
+}
+
+async function synthesizeBotnoiSpeech(text) {
+  if (!botnoiConfig.ttsUrl || !botnoiConfig.token) {
+    return {
+      skipped: true,
+      reason: "BOTNOI_TTS_URL and BOTNOI_TOKEN are required",
+    };
+  }
+
+  const response = await fetch(botnoiConfig.ttsUrl, {
+    method: "POST",
+    headers: {
+      "botnoi-token": botnoiConfig.token,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      text,
+      message: text,
+      speaker_id: botnoiConfig.speakerId,
+    }),
+  });
+
+  const contentType = response.headers.get("content-type") ?? "";
+  if (contentType.startsWith("audio/")) {
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (!response.ok) {
+      throw new Error(`Botnoi TTS API error: ${response.status}`);
+    }
+    return {
+      audioBase64: buffer.toString("base64"),
+      mimeType: contentType,
+    };
+  }
+
+  const textResponse = await response.text();
+  let payload = textResponse;
+  try {
+    payload = JSON.parse(textResponse);
+  } catch {
+    // Some APIs return plain text on errors.
+  }
+
+  if (!response.ok) {
+    throw new Error(`Botnoi TTS API error: ${response.status} ${typeof payload === "string" ? payload : JSON.stringify(payload)}`);
+  }
+
+  const audio = pickBotnoiAudio(payload);
+  if (!audio.audioUrl && !audio.audioBase64) {
+    throw new Error("Botnoi TTS API did not return audio_url or audio_base64");
+  }
+
+  return audio;
+}
+
 function parseBody(req) {
+  if (req.body && typeof req.body === "object") {
+    return Promise.resolve(req.body);
+  }
+
   return new Promise((resolve, reject) => {
     let body = "";
     req.on("data", (chunk) => {
@@ -260,14 +464,25 @@ function extractBooking(message, currentBooking) {
   if (lowerText.includes("กระบี่") || lowerText.includes("krabi")) booking.location = "กระบี่";
   if (lowerText.includes("สมุย") || lowerText.includes("samui")) booking.location = "สมุย";
 
-  const dateRangeMatch = text.match(/(?:วันที่|วัน)?\s*(\d{1,2}\s*[^\d\s]+)\s*(?:ถึง|จนถึง|-)\s*(\d{1,2}\s*[^\d\s]+)/);
+  const dateRangeMatch =
+    text.match(/(?:วันที่|วัน)?\s*(\d{1,2}\s*[^\d\s]+)\s*(?:ถึง|จนถึง|to|-)\s*(\d{1,2}\s*[^\d\s]+)/i) ??
+    text.match(/(?:วันที่|วัน)?\s*(\d{1,2})\s*([^\d\s]+)\s*(?:ถึง|จนถึง|to|-)\s*(\d{1,2})\s*(?:\2)?/i);
   if (dateRangeMatch) {
-    const monthText = dateRangeMatch[1].replace(/\d/g, "").trim() || dateRangeMatch[2].replace(/\d/g, "").trim();
-    booking.checkIn = parseDate(`${dateRangeMatch[1]} ${monthText}`);
-    booking.checkOut = parseDate(`${dateRangeMatch[2]} ${monthText}`);
+    if (dateRangeMatch.length >= 4) {
+      booking.checkIn = parseDate(`${dateRangeMatch[1]} ${dateRangeMatch[2]}`);
+      booking.checkOut = parseDate(`${dateRangeMatch[3]} ${dateRangeMatch[2]}`);
+    } else {
+      const monthText = dateRangeMatch[1].replace(/\d/g, "").trim() || dateRangeMatch[2].replace(/\d/g, "").trim();
+      booking.checkIn = parseDate(`${dateRangeMatch[1]} ${monthText}`);
+      booking.checkOut = parseDate(`${dateRangeMatch[2]} ${monthText}`);
+    }
   } else {
     const date = parseDate(text);
-    if (date && !booking.checkIn) booking.checkIn = date;
+    if (date && !booking.checkIn) {
+      booking.checkIn = date;
+    } else if (date && !booking.checkOut) {
+      booking.checkOut = date;
+    }
   }
 
   const guestsMatch = text.match(/(\d{1,2})\s*(?:คน|ท่าน|guest|guests)/i);
@@ -278,6 +493,10 @@ function extractBooking(message, currentBooking) {
 
   const nameMatch = text.match(/(?:ชื่อ|ผมชื่อ|ฉันชื่อ|ดิฉันชื่อ)\s*([ก-๙A-Za-z ]{2,40})(?:\s+เบอร์|\s+โทร|\s+พัก|\s*$)/);
   if (nameMatch) booking.customerName = nameMatch[1].trim();
+
+  if (!booking.customerName && getMissingField(currentBooking) === "customerName" && looksLikePlainCustomerName(text)) {
+    booking.customerName = text.trim();
+  }
 
   return booking;
 }
@@ -310,7 +529,8 @@ function buildSummary(booking) {
   return `สรุปการจอง ${destination} เช็คอิน ${booking.checkIn} เช็คเอาท์ ${booking.checkOut} พัก ${booking.guests} ท่าน ชื่อผู้จอง ${booking.customerName} เบอร์ ${booking.phone} ยืนยันการจองไหมคะ`;
 }
 
-async function handleAiBooking(req, res) {
+async function handleAiBooking(req, res, options = {}) {
+  const { requireBotnoi = false } = options;
   const { message = "", sessionId = "default", hotelName = "" } = await parseBody(req);
   const currentBooking = {
     ...(sessions.get(sessionId) ?? emptyBooking()),
@@ -347,7 +567,21 @@ async function handleAiBooking(req, res) {
       booking,
     });
   } catch (error) {
+    if (requireBotnoi) {
+      throw error;
+    }
     console.warn(error instanceof Error ? error.message : error);
+  }
+
+  if (requireBotnoi && !botnoiReply) {
+    sendJson(res, 502, {
+      error: "Botnoi conversation API is not configured or did not return a reply",
+      setup: {
+        requiredEnv: ["BOTNOI_TOKEN", "BOTNOI_API_URL"],
+        note: "BOTNOI_API_URL must be the Botnoi endpoint for sending a user message to the bot, not the create_template endpoint.",
+      },
+    });
+    return;
   }
 
   if (missingField) {
@@ -370,7 +604,7 @@ async function handleAiBooking(req, res) {
 }
 
 async function handleBotnoiBooking(req, res) {
-  await handleAiBooking(req, res);
+  await handleAiBooking(req, res, { requireBotnoi: true });
 }
 
 async function handleCreateBotnoiTemplate(req, res) {
@@ -393,6 +627,48 @@ async function handleCreateBotnoiTemplate(req, res) {
   };
 
   const result = await createBotnoiConfirmTemplate(template);
+  sendJson(res, 200, { ok: true, result });
+}
+
+async function handleBotnoiOutboundCall(req, res) {
+  const body = await parseBody(req);
+  const phone = body["Tel. Number"] ?? body.phone ?? body.tel ?? body.telNumber;
+  const appointmentDate = body["Appointment Date"] ?? body.appointmentDate;
+  const appointmentTime = body["Appointment Time"] ?? body.appointmentTime;
+  const templateId = body.template_id ?? body.templateId ?? process.env.BOTNOI_TEMPLATE_ID;
+
+  if (!phone || !appointmentDate || !appointmentTime || !templateId) {
+    sendJson(res, 400, {
+      error: "phone, appointmentDate, appointmentTime, and templateId are required",
+      example: {
+        phone: "0999999999",
+        appointmentDate: "31/07/2025",
+        appointmentTime: "00:00",
+        templateId: "7735331941",
+      },
+    });
+    return;
+  }
+
+  const result = await sendBotnoiOutboundCall({
+    "Tel. Number": String(phone),
+    "Appointment Date": String(appointmentDate),
+    "Appointment Time": String(appointmentTime),
+    template_id: String(templateId),
+  });
+  sendJson(res, 200, { ok: true, result });
+}
+
+async function handleBotnoiTts(req, res) {
+  const { text = "" } = await parseBody(req);
+  const normalizedText = String(text).trim();
+
+  if (!normalizedText) {
+    sendJson(res, 400, { error: "text is required" });
+    return;
+  }
+
+  const result = await synthesizeBotnoiSpeech(normalizedText);
   sendJson(res, 200, { ok: true, result });
 }
 
@@ -425,6 +701,16 @@ async function requestHandler(req, res) {
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/api/botnoi/outbound-call") {
+      await handleBotnoiOutboundCall(req, res);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/botnoi/tts") {
+      await handleBotnoiTts(req, res);
+      return;
+    }
+
     sendJson(res, 404, { error: "Not found" });
   } catch (error) {
     sendJson(res, 500, { error: error instanceof Error ? error.message : "Server error" });
@@ -434,6 +720,12 @@ async function requestHandler(req, res) {
 await ensureDatabase();
 
 const port = Number(process.env.PORT ?? 3001);
-createServer(requestHandler).listen(port, () => {
+const app = express();
+
+app.use(cors());
+app.use(express.json({ limit: "1mb" }));
+app.use(requestHandler);
+
+app.listen(port, () => {
   console.log(`AI booking backend is running on http://localhost:${port}`);
 });

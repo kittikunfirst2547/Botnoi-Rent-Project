@@ -58,7 +58,45 @@ npm install
 pnpm install
 ```
 
-### Run Development Server
+### Environment Setup
+
+สร้างไฟล์ `.env` จากตัวอย่างก่อนรัน backend:
+
+```bash
+cp .env.example .env
+```
+
+จากนั้นใส่ค่า Botnoi API ที่ต้องใช้ใน `.env` เช่น `BOTNOI_TOKEN`, `BOTNOI_API_URL`, `BOTNOI_TTS_URL` และค่าอื่น ๆ ตามที่ทีมได้รับมา
+
+> ถ้ายังไม่ได้ใส่ค่า Botnoi บางตัว ระบบ backend ยังรันได้ แต่ endpoint ที่ต้องเรียก Botnoi จริงอาจตอบกลับว่า config ยังไม่ครบ
+
+### Run Backend
+
+เปิด terminal แรก แล้วรัน:
+
+```bash
+npm run server
+# หรือ
+pnpm server
+```
+
+backend จะทำงานที่ [http://localhost:3001](http://localhost:3001)
+
+ทดสอบว่า backend พร้อมใช้งานได้ที่:
+
+```bash
+curl http://localhost:3001/api/health
+```
+
+ควรได้ response ประมาณนี้:
+
+```json
+{"ok":true}
+```
+
+### Run Frontend
+
+เปิด terminal ที่สอง แล้วรัน:
 
 ```bash
 npm run dev
@@ -66,7 +104,19 @@ npm run dev
 pnpm dev
 ```
 
-เปิดเบราว์เซอร์ที่ [http://localhost:5173](http://localhost:5173)
+เปิด browser ที่ [http://localhost:3000](http://localhost:3000)
+
+ในโหมด development frontend ใช้ Next.js และจะ rewrite request ที่ขึ้นต้นด้วย `/api` ไปที่ Express backend `http://localhost:3001` อัตโนมัติ ดังนั้นควรรัน backend และ frontend พร้อมกัน
+
+### Quick Start
+
+```bash
+# Terminal 1: backend
+npm run server
+
+# Terminal 2: frontend
+npm run dev
+```
 
 ### Build for Production
 

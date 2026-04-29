@@ -47,6 +47,21 @@ interface VoiceBookingResponse {
   saved: boolean;
 }
 
+interface BotnoiTtsResponse {
+  ok: boolean;
+  result?: {
+    skipped?: boolean;
+    reason?: string;
+    audioUrl?: string;
+    audio_url?: string;
+    audioBase64?: string;
+    audio_base64?: string;
+    mimeType?: string;
+    mime_type?: string;
+  };
+  error?: string;
+}
+
 declare global {
   interface Window {
     SpeechRecognition?: SpeechRecognitionConstructor;
@@ -75,6 +90,7 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
   const [callStatus, setCallStatus] = useState("พร้อมคุยกับ AI");
   const [isSpeechUnavailable, setIsSpeechUnavailable] = useState(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const keepListeningRef = useRef(false);
   const handledSpeechErrorRef = useRef(false);
   const sessionId = useMemo(() => createId(), []);
 
@@ -83,6 +99,10 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
   };
 
   const speak = (text: string) => {
+    void playBotnoiVoice(text);
+  };
+
+  const playBrowserVoice = (text: string) => {
     if (!("speechSynthesis" in window)) return;
 
     window.speechSynthesis.cancel();
@@ -90,6 +110,39 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
     utterance.lang = "th-TH";
     utterance.rate = 0.96;
     window.speechSynthesis.speak(utterance);
+  };
+
+  const playBotnoiVoice = async (text: string) => {
+    try {
+      const response = await fetch("/api/botnoi/tts", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ text }),
+      });
+
+      const data = (await response.json()) as BotnoiTtsResponse;
+      if (!response.ok) throw new Error(data.error || "Botnoi voice failed");
+      if (data.result?.skipped) {
+        playBrowserVoice(text);
+        return;
+      }
+
+      const audioUrl = data.result?.audioUrl ?? data.result?.audio_url;
+      const audioBase64 = data.result?.audioBase64 ?? data.result?.audio_base64;
+      const mimeType = data.result?.mimeType ?? data.result?.mime_type ?? "audio/mpeg";
+      const source = audioUrl || (audioBase64 ? `data:${mimeType};base64,${audioBase64}` : "");
+
+      if (!source) throw new Error("Botnoi voice did not return audio");
+
+      setCallStatus("กำลังเล่นเสียง Botnoi...");
+      const audio = new Audio(source);
+      audio.onended = () => setCallStatus("กำลังคุยอยู่");
+      await audio.play();
+    } catch (error) {
+      playBrowserVoice(text);
+    }
   };
 
   const sendToBotnoi = async (text: string) => {
@@ -102,7 +155,7 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
     setCallStatus("AI กำลังตอบ...");
 
     try {
-      const response = await fetch("/api/botnoi/booking-conversation", {
+      const response = await fetch("/api/ai/booking", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -116,7 +169,7 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
       });
 
       const data = (await response.json()) as VoiceBookingResponse;
-      if (!response.ok) throw new Error(data.reply || "เชื่อมต่อ Botnoi ไม่สำเร็จ");
+      if (!response.ok) throw new Error(data.reply || "เชื่อมต่อ AI ไม่สำเร็จ");
 
       addMessage("ai", data.reply);
       speak(data.reply);
@@ -143,9 +196,10 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
     }
 
     handledSpeechErrorRef.current = false;
+    keepListeningRef.current = true;
     const recognition = new SpeechRecognitionApi();
     recognition.lang = "th-TH";
-    recognition.continuous = false;
+    recognition.continuous = true;
     recognition.interimResults = false;
 
     recognition.onresult = (event) => {
@@ -154,11 +208,24 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
       setCallStatus(`ได้ยินว่า: ${transcript}`);
       void sendToBotnoi(transcript);
     };
-    recognition.onend = () => setIsListening(false);
+    recognition.onend = () => {
+      if (!keepListeningRef.current) {
+        setIsListening(false);
+        return;
+      }
+
+      try {
+        recognition.start();
+      } catch {
+        setIsListening(false);
+        keepListeningRef.current = false;
+      }
+    };
     recognition.onerror = (event) => {
       if (handledSpeechErrorRef.current) return;
       handledSpeechErrorRef.current = true;
       setIsListening(false);
+      keepListeningRef.current = false;
 
       const replies: Record<SpeechRecognitionErrorEvent["error"], string> = {
         aborted: "การรับเสียงถูกยกเลิกค่ะ ลองกดไมค์อีกครั้งได้เลย",
@@ -188,12 +255,14 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
   };
 
   const stopListening = () => {
+    keepListeningRef.current = false;
     recognitionRef.current?.stop();
     setIsListening(false);
     setCallStatus("พักสาย");
   };
 
   const closeCall = () => {
+    keepListeningRef.current = false;
     recognitionRef.current?.stop();
     window.speechSynthesis?.cancel();
     onClose();
@@ -229,11 +298,14 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
 
             <div className="flex flex-1 flex-col items-center gap-5 overflow-hidden px-5 py-6">
               <motion.div
-                animate={isListening ? { scale: [1, 1.08, 1] } : { scale: 1 }}
-                transition={{ repeat: isListening ? Infinity : 0, duration: 1.3 }}
-                className="grid h-28 w-28 place-items-center rounded-full bg-white text-black shadow-[0_0_60px_rgba(255,255,255,0.25)]"
+                animate={isListening ? { scale: [1, 1.07, 1], boxShadow: ["0 0 0 0 rgba(35,165,90,0.58)", "0 0 0 18px rgba(35,165,90,0)", "0 0 0 0 rgba(35,165,90,0)"] } : { scale: 1 }}
+                transition={{ repeat: isListening ? Infinity : 0, duration: 1.25, ease: "easeOut" }}
+                className={`relative grid h-28 w-28 place-items-center rounded-full transition-colors ${
+                  isListening ? "bg-[#23a55a] text-white shadow-[0_0_42px_rgba(35,165,90,0.75)]" : "bg-white text-black shadow-[0_0_60px_rgba(255,255,255,0.25)]"
+                }`}
               >
-                {isListening ? <MicOff className="h-11 w-11" /> : <Mic className="h-11 w-11" />}
+                {isListening && <span className="absolute inset-[-10px] rounded-full border border-[#23a55a]/60 shadow-[0_0_34px_rgba(35,165,90,0.7)]" />}
+                {isListening ? <MicOff className="relative h-11 w-11" /> : <Mic className="relative h-11 w-11" />}
               </motion.div>
 
               <div className="text-center">
@@ -281,7 +353,9 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
                 <button
                   onClick={isListening ? stopListening : startListening}
                   disabled={isSending || isSpeechUnavailable}
-                  className="flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-black transition hover:bg-white/90 disabled:opacity-45"
+                  className={`flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition disabled:opacity-45 ${
+                    isListening ? "bg-[#23a55a] text-white shadow-[0_0_22px_rgba(35,165,90,0.55)] hover:bg-[#1f944f]" : "bg-white text-black hover:bg-white/90"
+                  }`}
                 >
                   {isListening ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
                   {isSpeechUnavailable ? "พิมพ์แทน" : isListening ? "หยุดฟัง" : "เปิดไมค์"}

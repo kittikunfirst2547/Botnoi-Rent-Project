@@ -1,4 +1,7 @@
 node_modules/
 dist/
+.next/
 .env
 server/data/bookings.json
+server/data/bookings.sqlite
+server/data/bookings.sqlite-*
