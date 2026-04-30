@@ -10,6 +10,7 @@ import { BookingModal } from "./components/BookingModal";
 import { BotnoiChat } from "./components/BotnoiChat";
 import { BookingChoiceModal } from "./components/BookingChoiceModal";
 import { VoiceBookingCallModal } from "./components/VoiceBookingCallModal";
+import { TravelIdeaAssistant } from "./components/TravelIdeaAssistant";
 
 const hotels = [
   {
@@ -374,6 +375,7 @@ export default function App() {
       </div>
 
       <BotnoiChat />
+      <TravelIdeaAssistant />
 
       {selectedHotelData && (
         <>

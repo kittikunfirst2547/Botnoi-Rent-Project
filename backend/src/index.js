@@ -55,6 +55,57 @@ const hotels = [
   "Six Senses Samui",
 ];
 
+const hotelCatalog = [
+  {
+    name: "Anantara Siam Resort & Spa",
+    location: "กรุงเทพฯ สุขุมวิท",
+    province: "กรุงเทพ",
+    price: 12500,
+    tags: ["city", "luxury", "shopping", "spa", "bangkok"],
+    reasons: ["เหมาะกับการพักผ่อนในเมือง", "เดินทางสะดวก", "มีสปาและบริการระดับหรู"],
+  },
+  {
+    name: "The Peninsula Bangkok",
+    location: "ริมแม่น้ำเจ้าพระยา กรุงเทพฯ",
+    province: "กรุงเทพ",
+    price: 15800,
+    tags: ["river", "luxury", "romantic", "city", "view", "bangkok"],
+    reasons: ["วิวแม่น้ำสวย", "เหมาะกับคู่รัก", "บรรยากาศเงียบกว่ากลางเมือง"],
+  },
+  {
+    name: "Four Seasons Chiang Mai",
+    location: "แม่ริม เชียงใหม่",
+    province: "เชียงใหม่",
+    price: 11200,
+    tags: ["mountain", "nature", "quiet", "wellness", "chiang mai"],
+    reasons: ["เหมาะกับคนอยากพักใจท่ามกลางธรรมชาติ", "บรรยากาศเงียบ", "วิวภูเขาและทุ่งนา"],
+  },
+  {
+    name: "Amanpuri Phuket",
+    location: "กะตะน้อย ภูเก็ต",
+    province: "ภูเก็ต",
+    price: 28500,
+    tags: ["beach", "sea", "luxury", "private", "phuket"],
+    reasons: ["เหมาะกับโจทย์ใกล้ทะเล", "บรรยากาศเป็นส่วนตัว", "เหมาะกับการพักผ่อนหรู"],
+  },
+  {
+    name: "Rayavadee Krabi",
+    location: "อ่าวนาง กระบี่",
+    province: "กระบี่",
+    price: 18900,
+    tags: ["beach", "sea", "nature", "cliff", "krabi"],
+    reasons: ["ใกล้ทะเลและธรรมชาติ", "เหมาะกับสายวิวหน้าผาและชายหาด", "บรรยากาศโรแมนติก"],
+  },
+  {
+    name: "Six Senses Samui",
+    location: "เกาะสมุย สุราษฎร์ธานี",
+    province: "สมุย",
+    price: 21500,
+    tags: ["beach", "sea", "wellness", "quiet", "samui"],
+    reasons: ["เหมาะกับการพักผ่อนเงียบ ๆ ใกล้ทะเล", "เน้น wellness", "วิวทะเลสวย"],
+  },
+];
+
 const emptyBooking = () => ({
   hotelName: "",
   location: "",
@@ -410,6 +461,103 @@ function sendJson(res, statusCode, payload) {
   res.end(JSON.stringify(payload));
 }
 
+function normalizeSearchText(text) {
+  return normalizeThaiDigits(String(text ?? "").trim().toLowerCase());
+}
+
+function getRecommendationSignals(text) {
+  const normalized = normalizeSearchText(text);
+  const signals = new Set();
+
+  const groups = [
+    { signal: "phuket", words: ["ภูเก็ต", "phuket"] },
+    { signal: "krabi", words: ["กระบี่", "krabi"] },
+    { signal: "samui", words: ["สมุย", "samui", "เกาะ"] },
+    { signal: "chiang mai", words: ["เชียงใหม่", "chiang mai", "ภูเขา", "ธรรมชาติ", "เงียบ", "พักใจ"] },
+    { signal: "bangkok", words: ["กรุงเทพ", "bangkok", "เมือง", "สุขุมวิท", "เจ้าพระยา"] },
+    { signal: "beach", words: ["ทะเล", "ชายหาด", "beach", "sea", "หาด", "ติดทะเล", "ใกล้ทะเล"] },
+    { signal: "river", words: ["แม่น้ำ", "เจ้าพระยา", "river"] },
+    { signal: "luxury", words: ["หรู", "luxury", "พรีเมียม", "ส่วนตัว"] },
+    { signal: "quiet", words: ["เงียบ", "สงบ", "พักผ่อน", "ชิล", "relax"] },
+    { signal: "wellness", words: ["สปา", "wellness", "สุขภาพ"] },
+    { signal: "romantic", words: ["คู่รัก", "โรแมนติก", "แฟน", "honeymoon"] },
+  ];
+
+  for (const group of groups) {
+    if (group.words.some((word) => normalized.includes(word))) {
+      signals.add(group.signal);
+    }
+  }
+
+  return [...signals];
+}
+
+function recommendHotels(message) {
+  const signals = getRecommendationSignals(message);
+  const normalized = normalizeSearchText(message);
+  const budgetMatch = normalized.match(/(?:งบ|budget|ไม่เกิน|ต่ำกว่า)\s*(\d{4,6})/);
+  const budget = budgetMatch ? Number(budgetMatch[1]) : 0;
+
+  const scoredHotels = hotelCatalog
+    .map((hotel) => {
+      let score = 0;
+      const matchedSignals = [];
+
+      for (const signal of signals) {
+        if (hotel.tags.includes(signal) || hotel.province.toLowerCase().includes(signal)) {
+          score += 3;
+          matchedSignals.push(signal);
+        }
+      }
+
+      if (budget && hotel.price <= budget) score += 2;
+      if (signals.includes("beach") && hotel.tags.includes("sea")) score += 2;
+      if (normalized.includes(hotel.province.toLowerCase())) score += 3;
+
+      return { hotel, score, matchedSignals };
+    })
+    .sort((a, b) => b.score - a.score || a.hotel.price - b.hotel.price);
+
+  return scoredHotels.filter((item) => item.score > 0).slice(0, 3);
+}
+
+async function handleHotelRecommendation(req, res) {
+  const { message = "" } = await parseBody(req);
+  const normalizedMessage = String(message).trim();
+
+  if (!normalizedMessage) {
+    sendJson(res, 400, { error: "message is required" });
+    return;
+  }
+
+  const recommendations = recommendHotels(normalizedMessage);
+
+  if (!recommendations.length) {
+    sendJson(res, 200, {
+      reply: "อยากพักแนวไหนคะ เช่น ใกล้ทะเล ภูเขา ในเมือง เงียบ ๆ หรู ๆ หรือมีงบประมาณประมาณเท่าไหร่",
+      recommendations: [],
+      needsMoreInfo: true,
+    });
+    return;
+  }
+
+  const top = recommendations[0].hotel;
+  const reply = `จากโจทย์ของคุณ แนะนำ ${top.name} ที่${top.location} เพราะ${top.reasons[0]}ค่ะ`;
+
+  sendJson(res, 200, {
+    reply,
+    recommendations: recommendations.map(({ hotel, score }) => ({
+      name: hotel.name,
+      location: hotel.location,
+      province: hotel.province,
+      price: hotel.price,
+      reasons: hotel.reasons,
+      score,
+    })),
+    needsMoreInfo: false,
+  });
+}
+
 function normalizeThaiDigits(text) {
   const thaiDigits = "๐๑๒๓๔๕๖๗๘๙";
   return text.replace(/[๐-๙]/g, (digit) => String(thaiDigits.indexOf(digit)));
@@ -688,6 +836,11 @@ async function requestHandler(req, res) {
 
     if (req.method === "POST" && url.pathname === "/api/ai/booking") {
       await handleAiBooking(req, res);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/ai/hotel-recommendation") {
+      await handleHotelRecommendation(req, res);
       return;
     }
 
