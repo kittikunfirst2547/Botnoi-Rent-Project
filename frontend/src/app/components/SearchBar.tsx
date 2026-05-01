@@ -4,47 +4,43 @@ import { motion } from 'motion/react';
 export function SearchBar() {
   return (
     <motion.div
-      initial={{ opacity: 0, y: -20 }}
+      initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: 0.2 }}
-      className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-8 shadow-sm transition-colors duration-300"
+      transition={{ delay: 0.15, duration: 0.4 }}
+      className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 shadow-sm transition-colors duration-500"
     >
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
         <div className="relative">
-          <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <MapPin className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
           <input
             type="text"
             placeholder="ปลายทาง"
-            className="w-full pl-12 pr-4 py-4 bg-gray-50 dark:bg-gray-800 dark:text-white rounded-xl outline-none focus:ring-2 focus:ring-black dark:focus:ring-white transition-all border border-transparent focus:border-black dark:focus:border-white"
+            className="w-full rounded-xl border border-[var(--border)] bg-[var(--muted)] py-3 pl-10 pr-4 text-sm text-[var(--foreground)] outline-none transition-all placeholder:text-[var(--muted-foreground)] focus:border-[var(--accent-brand)] focus:ring-1 focus:ring-[var(--accent-brand)]"
           />
         </div>
 
         <div className="relative">
-          <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <Calendar className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
           <input
             type="text"
             placeholder="เช็คอิน - เช็คเอาท์"
-            className="w-full pl-12 pr-4 py-4 bg-gray-50 dark:bg-gray-800 dark:text-white rounded-xl outline-none focus:ring-2 focus:ring-black dark:focus:ring-white transition-all border border-transparent focus:border-black dark:focus:border-white"
+            className="w-full rounded-xl border border-[var(--border)] bg-[var(--muted)] py-3 pl-10 pr-4 text-sm text-[var(--foreground)] outline-none transition-all placeholder:text-[var(--muted-foreground)] focus:border-[var(--accent-brand)] focus:ring-1 focus:ring-[var(--accent-brand)]"
           />
         </div>
 
         <div className="relative">
-          <Users className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <Users className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
           <input
             type="text"
             placeholder="ผู้เข้าพัก"
-            className="w-full pl-12 pr-4 py-4 bg-gray-50 dark:bg-gray-800 dark:text-white rounded-xl outline-none focus:ring-2 focus:ring-black dark:focus:ring-white transition-all border border-transparent focus:border-black dark:focus:border-white"
+            className="w-full rounded-xl border border-[var(--border)] bg-[var(--muted)] py-3 pl-10 pr-4 text-sm text-[var(--foreground)] outline-none transition-all placeholder:text-[var(--muted-foreground)] focus:border-[var(--accent-brand)] focus:ring-1 focus:ring-[var(--accent-brand)]"
           />
         </div>
 
-        <motion.button
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
-          className="flex items-center justify-center space-x-2 bg-black dark:bg-white text-white dark:text-black px-6 py-4 rounded-xl hover:bg-gray-900 dark:hover:bg-gray-200 transition-all"
-        >
-          <Search className="w-5 h-5" />
-          <span className="font-medium">ค้นหา</span>
-        </motion.button>
+        <button className="flex items-center justify-center gap-2 rounded-xl bg-[var(--accent-brand)] px-5 py-3 text-sm font-medium text-white transition-all duration-200 hover:bg-[var(--accent-brand-hover)] active:scale-[0.98]">
+          <Search className="h-4 w-4" />
+          <span>ค้นหา</span>
+        </button>
       </div>
     </motion.div>
   );

@@ -132,81 +132,86 @@ export function TravelIdeaAssistant({ onBook }: TravelIdeaAssistantProps) {
 
   return (
     <>
-      <motion.button
+      {/* Floating Mic Button */}
+      <button
         onClick={isListening ? stopListening : startListening}
-        whileHover={{ scale: 1.04 }}
-        whileTap={{ scale: 0.96 }}
-        className={`fixed bottom-7 left-1/2 z-50 flex h-16 w-16 -translate-x-1/2 items-center justify-center rounded-full text-white transition ${
-          isListening ? "bg-[#23a55a] shadow-[0_0_42px_rgba(35,165,90,0.78)]" : "bg-black shadow-[0_16px_40px_rgba(0,0,0,0.28)] dark:bg-white dark:text-black"
+        className={`fixed bottom-6 left-1/2 z-50 flex h-14 w-14 -translate-x-1/2 items-center justify-center rounded-full shadow-lg transition-all duration-300 active:scale-95 ${
+          isListening
+            ? "bg-[var(--accent-brand)] text-white shadow-[var(--accent-brand)]/30"
+            : "bg-[var(--foreground)] text-[var(--background)] hover:shadow-xl"
         }`}
         aria-label={isListening ? "หยุดรับเสียง" : "เปิดไมค์เพื่อให้ AI แนะนำโรงแรม"}
       >
-        {isListening && <span className="absolute inset-[-10px] rounded-full border border-[#23a55a]/60 shadow-[0_0_34px_rgba(35,165,90,0.75)]" />}
-        {isListening ? <MicOff className="relative h-7 w-7" /> : <Mic className="relative h-7 w-7" />}
-      </motion.button>
+        {isListening ? <MicOff className="h-6 w-6" /> : <Mic className="h-6 w-6" />}
+      </button>
 
+      {/* Panel */}
       <AnimatePresence>
         {isOpen && (
           <motion.section
-            initial={{ opacity: 0, y: 18, scale: 0.98 }}
+            initial={{ opacity: 0, y: 16, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 18, scale: 0.98 }}
-            className="fixed bottom-28 left-1/2 z-50 w-[92%] max-w-lg -translate-x-1/2 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-[#101010]"
+            exit={{ opacity: 0, y: 16, scale: 0.98 }}
+            transition={{ duration: 0.25 }}
+            className="fixed bottom-24 left-1/2 z-50 w-[92%] max-w-md -translate-x-1/2 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-xl"
           >
-            <div className="flex items-start justify-between border-b border-gray-200 p-5 dark:border-gray-800">
+            {/* Header */}
+            <div className="flex items-start justify-between border-b border-[var(--border)] p-4">
               <div className="flex gap-3">
-                <span className="grid h-11 w-11 place-items-center rounded-full bg-[#23a55a] text-white shadow-[0_0_26px_rgba(35,165,90,0.45)]">
-                  <Sparkles className="h-5 w-5" />
+                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--accent-brand)] text-white">
+                  <Sparkles className="h-4 w-4" />
                 </span>
                 <div>
-                  <h2 className="text-lg font-semibold text-black dark:text-white">AI แนะนำที่พัก</h2>
-                  <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">บอกโจทย์การพักผ่อน แล้วให้ AI เลือกจากโรงแรมที่มี</p>
+                  <h2 className="text-sm font-semibold text-[var(--foreground)]">AI แนะนำที่พัก</h2>
+                  <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">บอกโจทย์การพักผ่อน แล้วให้ AI เลือกให้</p>
                 </div>
               </div>
-              <button onClick={closePanel} className="rounded-full p-2 text-gray-500 transition hover:bg-gray-100 dark:hover:bg-gray-800" aria-label="ปิด">
-                <X className="h-5 w-5" />
+              <button onClick={closePanel} className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--muted)]" aria-label="ปิด">
+                <X className="h-4 w-4" />
               </button>
             </div>
 
-            <div className="space-y-4 p-5">
-              <div className="rounded-xl bg-gray-50 p-4 text-sm leading-relaxed text-gray-700 dark:bg-white/[0.05] dark:text-gray-200">
+            {/* Content */}
+            <div className="max-h-[50vh] space-y-3 overflow-y-auto p-4">
+              <div className="rounded-xl bg-[var(--muted)] p-3.5 text-sm leading-relaxed text-[var(--foreground)]">
                 {reply}
               </div>
 
               {recommendations.length > 0 && (
-                <div className="space-y-3">
+                <div className="space-y-2">
                   {recommendations.map((hotel) => (
-                    <div key={hotel.name} className="rounded-xl border border-gray-200 p-4 dark:border-gray-800 transition hover:border-[#23a55a]/50 dark:hover:border-[#23a55a]/50">
-                      <div className="flex items-start justify-between gap-3">
+                    <div key={hotel.name} className="rounded-xl border border-[var(--border)] p-3.5 transition-colors hover:border-[var(--accent-brand)]/40">
+                      <div className="flex items-start justify-between gap-2">
                         <div>
-                          <h3 className="font-semibold text-black dark:text-white">{hotel.name}</h3>
-                          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{hotel.location}</p>
+                          <h3 className="text-sm font-semibold text-[var(--foreground)]">{hotel.name}</h3>
+                          <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">{hotel.location}</p>
                         </div>
-                        <span className="whitespace-nowrap text-sm font-semibold text-black dark:text-white">฿{hotel.price.toLocaleString()}</span>
+                        <span className="shrink-0 text-sm font-semibold text-[var(--accent-brand)]">
+                          ฿{hotel.price.toLocaleString()}
+                        </span>
                       </div>
-                      <ul className="mt-3 space-y-1 text-sm text-gray-600 dark:text-gray-300">
+                      <ul className="mt-2 space-y-0.5 text-xs text-[var(--muted-foreground)]">
                         {hotel.reasons.slice(0, 2).map((reason) => (
-                          <li key={reason}>- {reason}</li>
+                          <li key={reason}>• {reason}</li>
                         ))}
                       </ul>
                       {onBook && (
-                        <motion.button
+                        <button
                           onClick={() => {
                             onBook(hotel.name);
                             closePanel();
                           }}
-                          whileHover={{ scale: 1.02 }}
-                          whileTap={{ scale: 0.97 }}
-                          className="mt-3 w-full rounded-lg bg-[#23a55a] px-4 py-2.5 text-sm font-semibold text-white shadow-[0_4px_16px_rgba(35,165,90,0.3)] transition hover:bg-[#1e8f4e] hover:shadow-[0_6px_20px_rgba(35,165,90,0.4)]"
+                          className="mt-2.5 w-full rounded-lg bg-[var(--accent-brand)] px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-[var(--accent-brand-hover)]"
                         >
                           จองเลย
-                        </motion.button>
+                        </button>
                       )}
                     </div>
                   ))}
                 </div>
               )}
 
+              {/* Input */}
               <div className="flex gap-2">
                 <input
                   value={input}
@@ -215,12 +220,12 @@ export function TravelIdeaAssistant({ onBook }: TravelIdeaAssistantProps) {
                     if (event.key === "Enter") void askRecommendation(input);
                   }}
                   placeholder="เช่น อยากไปภูเก็ต ใกล้ทะเล งบไม่เกิน 30000"
-                  className="min-w-0 flex-1 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-black outline-none focus:border-black dark:border-gray-800 dark:bg-[#0b0b0b] dark:text-white dark:focus:border-white"
+                  className="min-w-0 flex-1 rounded-xl border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-sm text-[var(--foreground)] outline-none transition-colors placeholder:text-[var(--muted-foreground)] focus:border-[var(--accent-brand)]"
                 />
                 <button
                   onClick={() => void askRecommendation(input)}
                   disabled={isSending}
-                  className="grid h-10 w-10 place-items-center rounded-xl bg-black text-white transition hover:bg-gray-900 disabled:opacity-50 dark:bg-white dark:text-black"
+                  className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent-brand)] text-white transition-colors hover:bg-[var(--accent-brand-hover)] disabled:opacity-50"
                   aria-label="ส่งโจทย์"
                 >
                   {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}

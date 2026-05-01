@@ -10,16 +10,20 @@
   "scripts": {
     "dev:frontend": "npm run dev --workspace=frontend",
     "dev:backend": "npm run dev --workspace=backend",
-    "dev": "npm run dev:backend & npm run dev:frontend",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "build:frontend": "npm run build --workspace=frontend"
   },
   "devDependencies": {
-    "typescript": "^6.0.3",
-    "@types/node": "^25.6.0"
+    "@types/node": "^25.6.0",
+    "concurrently": "^9.2.1",
+    "typescript": "^6.0.3"
   },
   "pnpm": {
     "overrides": {
       "vite": "6.3.5"
     }
+  },
+  "dependencies": {
+    "sqlite3": "^6.0.1"
   }
 }

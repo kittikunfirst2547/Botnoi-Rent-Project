@@ -32,6 +32,9 @@ export function BookingModal({ isOpen, onClose, hotelName, price }: BookingModal
     }
   };
 
+  const inputClass =
+    "w-full rounded-xl border border-[var(--border)] bg-[var(--muted)] px-4 py-3 text-sm text-[var(--foreground)] outline-none transition-all placeholder:text-[var(--muted-foreground)] focus:border-[var(--accent-brand)] focus:ring-1 focus:ring-[var(--accent-brand)]";
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -41,44 +44,51 @@ export function BookingModal({ isOpen, onClose, hotelName, price }: BookingModal
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60]"
+            className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-sm"
           />
           <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            initial={{ opacity: 0, scale: 0.97, y: 12 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[70] w-[90%] max-w-2xl bg-white rounded-2xl shadow-2xl overflow-hidden"
+            exit={{ opacity: 0, scale: 0.97, y: 12 }}
+            className="fixed left-1/2 top-1/2 z-[70] w-[92%] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-xl"
           >
-            <div className="bg-white border-b border-gray-200 p-8">
-              <div className="flex justify-between items-start mb-8">
+            {/* Header */}
+            <div className="border-b border-[var(--border)] p-6">
+              <div className="mb-6 flex items-start justify-between">
                 <div>
-                  <h2 className="text-3xl mb-2 text-black font-semibold" style={{ fontFamily: 'var(--font-display)' }}>จองห้องพัก</h2>
-                  <p className="text-gray-500">{hotelName}</p>
+                  <h2
+                    className="text-xl font-semibold text-[var(--foreground)]"
+                    style={{ fontFamily: 'var(--font-display)' }}
+                  >
+                    จองห้องพัก
+                  </h2>
+                  <p className="mt-1 text-sm text-[var(--muted-foreground)]">{hotelName}</p>
                 </div>
                 <button
                   onClick={onClose}
-                  className="hover:bg-gray-100 p-2 rounded-full transition-colors"
+                  className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
                 >
-                  <X className="w-6 h-6 text-black" />
+                  <X className="h-5 w-5" />
                 </button>
               </div>
 
-              <div className="flex items-center justify-between">
+              {/* Steps */}
+              <div className="flex items-center justify-center gap-2">
                 {[1, 2, 3].map((s) => (
-                  <div key={s} className="flex items-center">
+                  <div key={s} className="flex items-center gap-2">
                     <div
-                      className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all font-medium ${
+                      className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-medium transition-all ${
                         step >= s
-                          ? 'bg-black border-black text-white'
-                          : 'bg-white border-gray-300 text-gray-400'
+                          ? 'bg-[var(--accent-brand)] text-white'
+                          : 'border border-[var(--border)] text-[var(--muted-foreground)]'
                       }`}
                     >
-                      {step > s ? <Check className="w-5 h-5" /> : s}
+                      {step > s ? <Check className="h-4 w-4" /> : s}
                     </div>
                     {s < 3 && (
                       <div
-                        className={`w-32 h-0.5 mx-3 transition-all ${
-                          step > s ? 'bg-black' : 'bg-gray-200'
+                        className={`h-px w-12 transition-colors ${
+                          step > s ? 'bg-[var(--accent-brand)]' : 'bg-[var(--border)]'
                         }`}
                       />
                     )}
@@ -87,52 +97,56 @@ export function BookingModal({ isOpen, onClose, hotelName, price }: BookingModal
               </div>
             </div>
 
-            <div className="p-8 max-h-[400px] overflow-y-auto">
+            {/* Form Content */}
+            <div className="max-h-[380px] overflow-y-auto p-6">
               {step === 1 && (
                 <motion.div
-                  initial={{ opacity: 0, x: 20 }}
+                  initial={{ opacity: 0, x: 12 }}
                   animate={{ opacity: 1, x: 0 }}
-                  className="space-y-5"
+                  className="space-y-4"
                 >
-                  <h3 className="text-black mb-6 text-2xl font-semibold" style={{ fontFamily: 'var(--font-display)' }}>
+                  <h3
+                    className="mb-2 text-base font-medium text-[var(--foreground)]"
+                    style={{ fontFamily: 'var(--font-display)' }}
+                  >
                     รายละเอียดการเข้าพัก
                   </h3>
 
                   <div>
-                    <label className="block text-sm text-gray-600 mb-2 font-medium">
-                      <Calendar className="w-4 h-4 inline mr-2" />
+                    <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-[var(--muted-foreground)]">
+                      <Calendar className="h-3.5 w-3.5" />
                       วันเช็คอิน
                     </label>
                     <input
                       type="date"
                       value={formData.checkIn}
                       onChange={(e) => setFormData({ ...formData, checkIn: e.target.value })}
-                      className="w-full px-4 py-3 bg-gray-50 rounded-lg outline-none focus:ring-2 focus:ring-black transition-all border border-transparent focus:border-black"
+                      className={inputClass}
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm text-gray-600 mb-2 font-medium">
-                      <Calendar className="w-4 h-4 inline mr-2" />
+                    <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-[var(--muted-foreground)]">
+                      <Calendar className="h-3.5 w-3.5" />
                       วันเช็คเอาท์
                     </label>
                     <input
                       type="date"
                       value={formData.checkOut}
                       onChange={(e) => setFormData({ ...formData, checkOut: e.target.value })}
-                      className="w-full px-4 py-3 bg-gray-50 rounded-lg outline-none focus:ring-2 focus:ring-black transition-all border border-transparent focus:border-black"
+                      className={inputClass}
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm text-gray-600 mb-2 font-medium">
-                      <Users className="w-4 h-4 inline mr-2" />
+                    <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-[var(--muted-foreground)]">
+                      <Users className="h-3.5 w-3.5" />
                       จำนวนผู้เข้าพัก
                     </label>
                     <select
                       value={formData.guests}
                       onChange={(e) => setFormData({ ...formData, guests: e.target.value })}
-                      className="w-full px-4 py-3 bg-gray-50 rounded-lg outline-none focus:ring-2 focus:ring-black transition-all border border-transparent focus:border-black"
+                      className={inputClass}
                     >
                       <option value="1">1 คน</option>
                       <option value="2">2 คน</option>
@@ -145,44 +159,47 @@ export function BookingModal({ isOpen, onClose, hotelName, price }: BookingModal
 
               {step === 2 && (
                 <motion.div
-                  initial={{ opacity: 0, x: 20 }}
+                  initial={{ opacity: 0, x: 12 }}
                   animate={{ opacity: 1, x: 0 }}
-                  className="space-y-5"
+                  className="space-y-4"
                 >
-                  <h3 className="text-black mb-6 text-2xl font-semibold" style={{ fontFamily: 'var(--font-display)' }}>
+                  <h3
+                    className="mb-2 text-base font-medium text-[var(--foreground)]"
+                    style={{ fontFamily: 'var(--font-display)' }}
+                  >
                     ข้อมูลผู้จอง
                   </h3>
 
                   <div>
-                    <label className="block text-sm text-gray-600 mb-2 font-medium">ชื่อ-นามสกุล</label>
+                    <label className="mb-1.5 block text-xs font-medium text-[var(--muted-foreground)]">ชื่อ-นามสกุล</label>
                     <input
                       type="text"
                       value={formData.name}
                       onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                       placeholder="กรุณาระบุชื่อ-นามสกุล"
-                      className="w-full px-4 py-3 bg-gray-50 rounded-lg outline-none focus:ring-2 focus:ring-black transition-all border border-transparent focus:border-black"
+                      className={inputClass}
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm text-gray-600 mb-2 font-medium">อีเมล</label>
+                    <label className="mb-1.5 block text-xs font-medium text-[var(--muted-foreground)]">อีเมล</label>
                     <input
                       type="email"
                       value={formData.email}
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                       placeholder="example@email.com"
-                      className="w-full px-4 py-3 bg-gray-50 rounded-lg outline-none focus:ring-2 focus:ring-black transition-all border border-transparent focus:border-black"
+                      className={inputClass}
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm text-gray-600 mb-2 font-medium">เบอร์โทรศัพท์</label>
+                    <label className="mb-1.5 block text-xs font-medium text-[var(--muted-foreground)]">เบอร์โทรศัพท์</label>
                     <input
                       type="tel"
                       value={formData.phone}
                       onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                       placeholder="0xx-xxx-xxxx"
-                      className="w-full px-4 py-3 bg-gray-50 rounded-lg outline-none focus:ring-2 focus:ring-black transition-all border border-transparent focus:border-black"
+                      className={inputClass}
                     />
                   </div>
                 </motion.div>
@@ -190,72 +207,62 @@ export function BookingModal({ isOpen, onClose, hotelName, price }: BookingModal
 
               {step === 3 && (
                 <motion.div
-                  initial={{ opacity: 0, x: 20 }}
+                  initial={{ opacity: 0, x: 12 }}
                   animate={{ opacity: 1, x: 0 }}
-                  className="space-y-5"
+                  className="space-y-4"
                 >
-                  <h3 className="text-black mb-6 text-2xl font-semibold" style={{ fontFamily: 'var(--font-display)' }}>
+                  <h3
+                    className="mb-2 text-base font-medium text-[var(--foreground)]"
+                    style={{ fontFamily: 'var(--font-display)' }}
+                  >
                     ชำระเงิน
                   </h3>
 
-                  <div className="bg-black p-6 rounded-xl text-white">
-                    <p className="text-sm opacity-70 mb-2">ยอดรวมทั้งหมด</p>
-                    <p className="text-4xl font-semibold" style={{ fontFamily: 'var(--font-display)' }}>
+                  <div className="rounded-xl bg-[var(--accent-brand)] p-5 text-white">
+                    <p className="text-xs opacity-80">ยอดรวมทั้งหมด</p>
+                    <p className="mt-1 text-2xl font-semibold" style={{ fontFamily: 'var(--font-display)' }}>
                       ฿{price.toLocaleString()}
                     </p>
                   </div>
 
                   <div>
-                    <label className="block text-sm text-gray-600 mb-2 font-medium">
-                      <CreditCard className="w-4 h-4 inline mr-2" />
+                    <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-[var(--muted-foreground)]">
+                      <CreditCard className="h-3.5 w-3.5" />
                       หมายเลขบัตร
                     </label>
-                    <input
-                      type="text"
-                      placeholder="xxxx xxxx xxxx xxxx"
-                      className="w-full px-4 py-3 bg-gray-50 rounded-lg outline-none focus:ring-2 focus:ring-black transition-all border border-transparent focus:border-black"
-                    />
+                    <input type="text" placeholder="xxxx xxxx xxxx xxxx" className={inputClass} />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-sm text-gray-600 mb-2 font-medium">วันหมดอายุ</label>
-                      <input
-                        type="text"
-                        placeholder="MM/YY"
-                        className="w-full px-4 py-3 bg-gray-50 rounded-lg outline-none focus:ring-2 focus:ring-black transition-all border border-transparent focus:border-black"
-                      />
+                      <label className="mb-1.5 block text-xs font-medium text-[var(--muted-foreground)]">วันหมดอายุ</label>
+                      <input type="text" placeholder="MM/YY" className={inputClass} />
                     </div>
                     <div>
-                      <label className="block text-sm text-gray-600 mb-2 font-medium">CVV</label>
-                      <input
-                        type="text"
-                        placeholder="xxx"
-                        className="w-full px-4 py-3 bg-gray-50 rounded-lg outline-none focus:ring-2 focus:ring-black transition-all border border-transparent focus:border-black"
-                      />
+                      <label className="mb-1.5 block text-xs font-medium text-[var(--muted-foreground)]">CVV</label>
+                      <input type="text" placeholder="xxx" className={inputClass} />
                     </div>
                   </div>
                 </motion.div>
               )}
+            </div>
 
-              <div className="bg-white border-t border-gray-200 p-8">
-                <div className="flex justify-between gap-4">
-                  <button
-                    onClick={() => setStep(Math.max(1, step - 1))}
-                    disabled={step === 1}
-                    className="px-8 py-3.5 text-gray-600 hover:text-gray-900 disabled:opacity-30 disabled:cursor-not-allowed transition-all font-medium text-lg"
-                  >
-                    ย้อนกลับ
-                  </button>
-                  <motion.button
-                    onClick={handleConfirm}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    className="flex-1 px-8 py-3.5 bg-black text-white rounded-xl hover:bg-gray-900 transition-all font-medium text-lg"
-                  >
-                    {step === 3 ? 'ยืนยันการจอง' : 'ถัดไป'}
-                  </motion.button>
-                </div>
+            {/* Actions */}
+            <div className="border-t border-[var(--border)] p-5">
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setStep(Math.max(1, step - 1))}
+                  disabled={step === 1}
+                  className="rounded-xl px-5 py-2.5 text-sm font-medium text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-30"
+                >
+                  ย้อนกลับ
+                </button>
+                <button
+                  onClick={handleConfirm}
+                  className="flex-1 rounded-xl bg-[var(--accent-brand)] px-5 py-2.5 text-sm font-medium text-white transition-all duration-200 hover:bg-[var(--accent-brand-hover)] active:scale-[0.98]"
+                >
+                  {step === 3 ? 'ยืนยันการจอง' : 'ถัดไป'}
+                </button>
               </div>
             </div>
           </motion.div>

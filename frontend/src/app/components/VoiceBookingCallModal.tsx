@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { Loader2, Mic, MicOff, PhoneOff, Send, Volume2, X } from "lucide-react";
+import { Loader2, Mic, MicOff, PhoneOff, Send, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 
 type SpeechRecognitionConstructor = new () => SpeechRecognition;
@@ -136,11 +136,11 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
 
       if (!source) throw new Error("Botnoi voice did not return audio");
 
-      setCallStatus("กำลังเล่นเสียง Botnoi...");
+      setCallStatus("กำลังเล่นเสียง...");
       const audio = new Audio(source);
       audio.onended = () => setCallStatus("กำลังคุยอยู่");
       await audio.play();
-    } catch (error) {
+    } catch {
       playBrowserVoice(text);
     }
   };
@@ -173,7 +173,7 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
 
       addMessage("ai", data.reply);
       speak(data.reply);
-      setCallStatus(data.saved ? "จองสำเร็จ" : "กำลังคุยอยู่");
+      setCallStatus(data.saved ? "จองสำเร็จ ✓" : "กำลังคุยอยู่");
     } catch (error) {
       const reply = error instanceof Error ? error.message : "เชื่อมต่อ AI ไม่สำเร็จ";
       addMessage("ai", reply);
@@ -277,58 +277,62 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={closeCall}
-            className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm"
+            className="fixed inset-0 z-[60] bg-black/40 backdrop-blur-sm"
           />
           <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: 18 }}
+            initial={{ opacity: 0, scale: 0.97, y: 12 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 18 }}
-            className="fixed left-1/2 top-1/2 z-[70] flex h-[720px] max-h-[92vh] w-[92%] max-w-md -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-gray-800 bg-[#101010] text-white shadow-2xl"
+            exit={{ opacity: 0, scale: 0.97, y: 12 }}
+            className="fixed left-1/2 top-1/2 z-[70] flex h-[680px] max-h-[92vh] w-[92%] max-w-md -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-xl"
           >
-            <div className="flex items-start justify-between border-b border-white/10 p-5">
+            {/* Header */}
+            <div className="flex items-start justify-between border-b border-[var(--border)] p-5">
               <div>
-                <p className="text-sm text-white/50">Botnoi Voice Booking</p>
-                <h2 className="mt-1 text-xl font-semibold">{hotelName}</h2>
-                <p className="mt-1 text-sm text-white/60">เริ่มต้น ฿{price.toLocaleString()} / คืน</p>
+                <p className="text-xs text-[var(--muted-foreground)]">Voice Booking</p>
+                <h2 className="mt-0.5 text-base font-semibold text-[var(--foreground)]">{hotelName}</h2>
+                <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">เริ่มต้น ฿{price.toLocaleString()} / คืน</p>
               </div>
-              <button onClick={closeCall} className="rounded-full p-2 text-white/80 transition hover:bg-white/10" aria-label="ปิด">
+              <button onClick={closeCall} className="rounded-lg p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--muted)]" aria-label="ปิด">
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            <div className="flex flex-1 flex-col items-center gap-5 overflow-hidden px-5 py-6">
-              <motion.div
-                animate={isListening ? { scale: [1, 1.07, 1], boxShadow: ["0 0 0 0 rgba(35,165,90,0.58)", "0 0 0 18px rgba(35,165,90,0)", "0 0 0 0 rgba(35,165,90,0)"] } : { scale: 1 }}
-                transition={{ repeat: isListening ? Infinity : 0, duration: 1.25, ease: "easeOut" }}
-                className={`relative grid h-28 w-28 place-items-center rounded-full transition-colors ${
-                  isListening ? "bg-[#23a55a] text-white shadow-[0_0_42px_rgba(35,165,90,0.75)]" : "bg-white text-black shadow-[0_0_60px_rgba(255,255,255,0.25)]"
+            {/* Mic indicator + status */}
+            <div className="flex flex-col items-center gap-3 px-5 pt-6 pb-4">
+              <div
+                className={`flex h-20 w-20 items-center justify-center rounded-full transition-all duration-300 ${
+                  isListening
+                    ? "bg-[var(--accent-brand)] text-white shadow-lg shadow-[var(--accent-brand)]/30"
+                    : "bg-[var(--muted)] text-[var(--foreground)]"
                 }`}
               >
-                {isListening && <span className="absolute inset-[-10px] rounded-full border border-[#23a55a]/60 shadow-[0_0_34px_rgba(35,165,90,0.7)]" />}
-                {isListening ? <MicOff className="relative h-11 w-11" /> : <Mic className="relative h-11 w-11" />}
-              </motion.div>
-
-              <div className="text-center">
-                <p className="text-lg font-semibold">{callStatus}</p>
-                <p className="mt-1 text-sm text-white/50">ตอบว่า “ยืนยัน” เมื่อข้อมูลถูกต้อง</p>
+                {isListening ? <MicOff className="h-8 w-8" /> : <Mic className="h-8 w-8" />}
               </div>
-
-              <div className="min-h-0 w-full flex-1 space-y-3 overflow-y-auto rounded-xl bg-white/[0.04] p-3">
-                {messages.map((message) => (
-                  <div key={message.id} className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"}`}>
-                    <div
-                      className={`max-w-[84%] rounded-xl px-3 py-2 text-sm leading-relaxed ${
-                        message.sender === "user" ? "bg-white text-black" : "bg-white/10 text-white"
-                      }`}
-                    >
-                      {message.text}
-                    </div>
-                  </div>
-                ))}
+              <div className="text-center">
+                <p className="text-sm font-medium text-[var(--foreground)]">{callStatus}</p>
+                <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">ตอบว่า "ยืนยัน" เมื่อข้อมูลถูกต้อง</p>
               </div>
             </div>
 
-            <div className="space-y-3 border-t border-white/10 p-4">
+            {/* Chat messages */}
+            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 pb-3">
+              {messages.map((message) => (
+                <div key={message.id} className={`flex ${message.sender === "user" ? "justify-end" : "justify-start"}`}>
+                  <div
+                    className={`max-w-[84%] rounded-xl px-3.5 py-2 text-sm leading-relaxed ${
+                      message.sender === "user"
+                        ? "bg-[var(--accent-brand)] text-white"
+                        : "bg-[var(--muted)] text-[var(--foreground)]"
+                    }`}
+                  >
+                    {message.text}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Controls */}
+            <div className="space-y-3 border-t border-[var(--border)] p-4">
               <div className="flex gap-2">
                 <input
                   value={manualText}
@@ -337,35 +341,36 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
                     if (event.key === "Enter") void sendToBotnoi(manualText);
                   }}
                   placeholder="พิมพ์แทนการพูดได้..."
-                  className="min-w-0 flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none placeholder:text-white/40 focus:border-white/40"
+                  className="min-w-0 flex-1 rounded-xl border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-sm text-[var(--foreground)] outline-none transition-colors placeholder:text-[var(--muted-foreground)] focus:border-[var(--accent-brand)]"
                 />
                 <button
                   onClick={() => void sendToBotnoi(manualText)}
                   disabled={isSending}
-                  className="grid h-10 w-10 place-items-center rounded-xl bg-white text-black transition hover:bg-white/90 disabled:opacity-50"
+                  className="flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--accent-brand)] text-white transition-colors hover:bg-[var(--accent-brand-hover)] disabled:opacity-50"
                   aria-label="ส่งข้อความ"
                 >
                   {isSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 </button>
               </div>
 
-              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+              <div className="flex gap-2">
                 <button
                   onClick={isListening ? stopListening : startListening}
                   disabled={isSending || isSpeechUnavailable}
-                  className={`flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition disabled:opacity-45 ${
-                    isListening ? "bg-[#23a55a] text-white shadow-[0_0_22px_rgba(35,165,90,0.55)] hover:bg-[#1f944f]" : "bg-white text-black hover:bg-white/90"
+                  className={`flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all disabled:opacity-40 ${
+                    isListening
+                      ? "bg-[var(--accent-brand)] text-white hover:bg-[var(--accent-brand-hover)]"
+                      : "bg-[var(--muted)] text-[var(--foreground)] hover:bg-[var(--border)]"
                   }`}
                 >
-                  {isListening ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+                  {isListening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
                   {isSpeechUnavailable ? "พิมพ์แทน" : isListening ? "หยุดฟัง" : "เปิดไมค์"}
                 </button>
-                <Volume2 className="h-5 w-5 text-white/50" />
                 <button
                   onClick={closeCall}
-                  className="flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-red-700"
+                  className="flex items-center justify-center gap-2 rounded-xl bg-red-500/10 px-4 py-2.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-500/20 dark:text-red-400"
                 >
-                  <PhoneOff className="h-5 w-5" />
+                  <PhoneOff className="h-4 w-4" />
                   วางสาย
                 </button>
               </div>

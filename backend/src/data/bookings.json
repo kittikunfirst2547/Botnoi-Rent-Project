@@ -1,1 +1,50 @@
-[]
+[
+  {
+    "id": "493ed4e0-4a93-4fab-ae7c-02d1ed939836",
+    "hotelName": "Anantara Siam Resort & Spa",
+    "location": "",
+    "checkIn": "2026-05-15",
+    "checkOut": "2026-08-14",
+    "guests": 5,
+    "customerName": "กิตติคุณเฟิร์ส",
+    "phone": "0867893421",
+    "status": "confirmed",
+    "createdAt": "2026-04-30T06:01:20.741Z"
+  },
+  {
+    "id": "3dac7fd9-4a11-4d97-be52-abc6e2c230fa",
+    "hotelName": "The Peninsula Bangkok",
+    "location": "",
+    "checkIn": "2026-01-10",
+    "checkOut": "2026-08-12",
+    "guests": 2,
+    "customerName": "ปีเตอร์เดนแมน",
+    "phone": "087777777777",
+    "status": "confirmed",
+    "createdAt": "2026-04-30T06:09:05.657Z"
+  },
+  {
+    "id": "08f0b576-57be-4bfd-98fb-8c2044be0a83",
+    "hotelName": "Six Senses Samui",
+    "location": "",
+    "checkIn": "2026-01-11",
+    "checkOut": "2026-01-12",
+    "guests": 5,
+    "customerName": "จอร์จจี้ Happy",
+    "phone": "0123456789",
+    "status": "confirmed",
+    "createdAt": "2026-04-30T08:35:17.618Z"
+  },
+  {
+    "id": "1ccea46b-fd39-4de2-b0df-a52d7db8bcb3",
+    "hotelName": "Rayavadee Krabi",
+    "location": "",
+    "checkIn": "2026-08-12",
+    "checkOut": "2026-08-14",
+    "guests": 3,
+    "customerName": "มังกี้ดีลูฟี่",
+    "phone": "0875643421",
+    "status": "confirmed",
+    "createdAt": "2026-04-30T09:32:09.835Z"
+  }
+]
