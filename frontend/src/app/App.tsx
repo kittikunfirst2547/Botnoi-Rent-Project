@@ -5,7 +5,7 @@ import Link from "next/link";
 import { Sparkles, Sun, Moon, ArrowRight } from "lucide-react";
 import { motion } from "motion/react";
 
-import { hotels } from "../../data/hotels";
+import { hotels } from "../data/hotels";
 import { HotelCard } from "./components/HotelCard";
 import { SearchBar } from "./components/SearchBar";
 import { BookingModal } from "./components/BookingModal";
