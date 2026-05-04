@@ -6,6 +6,8 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import cors from "cors";
 import express from "express";
+import { config } from "./config.js";
+import health from "./routes/health.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = join(__dirname, "..");
@@ -16,7 +18,7 @@ let bookingsDb;
 const sessions = new Map();
 
 function loadEnvFile() {
-  const envFile = join(rootDir, ".env");
+  const envFile = join(__dirname, "../.env");
   if (!existsSync(envFile)) return;
 
   const lines = readFileSync(envFile, "utf8").split(/\r?\n/);
@@ -35,16 +37,7 @@ function loadEnvFile() {
   }
 }
 
-loadEnvFile();
 
-const botnoiConfig = {
-  apiBaseUrl: process.env.BOTNOI_API_BASE_URL ?? "https://api-voice.botnoi.ai/api/voicebot",
-  apiUrl: process.env.BOTNOI_API_URL ?? "",
-  ttsUrl: process.env.BOTNOI_TTS_URL ?? "",
-  token: process.env.BOTNOI_TOKEN ?? process.env.BOTNOI_API_KEY ?? "",
-  botId: process.env.BOTNOI_BOT_ID ?? "69c39e5ab114409d08f2979a",
-  speakerId: process.env.BOTNOI_SPEAKER_ID ?? "523",
-};
 
 const hotels = [
   "Anantara Siam Resort & Spa",
@@ -212,18 +205,18 @@ function pickBotnoiReply(payload) {
 }
 
 async function askBotnoi({ message, sessionId, booking }) {
-  if (!botnoiConfig.apiUrl || !botnoiConfig.token) {
+  if (!config.botnoi.apiUrl || !config.botnoi.token) {
     return "";
   }
 
-  const response = await fetch(botnoiConfig.apiUrl, {
+  const response = await fetch(config.botnoi.apiUrl, {
     method: "POST",
     headers: {
-      "botnoi-token": botnoiConfig.token,
+      "botnoi-token": config.botnoi.token,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      bot_id: botnoiConfig.botId,
+      bot_id: config.botnoi.botId,
       session_id: sessionId,
       message,
       context: {
@@ -260,7 +253,7 @@ function getBotnoiOutboundCallUrl() {
 
 async function createBotnoiConfirmTemplate(template) {
   const url = getBotnoiConfirmTemplateUrl();
-  if (!url || !botnoiConfig.token) {
+  if (!url || !config.botnoi.token) {
     return {
       skipped: true,
       reason: "BOTNOI_CONFIRM_TEMPLATE_URL or BOTNOI_API_BASE_URL and BOTNOI_TOKEN are required",
@@ -270,7 +263,7 @@ async function createBotnoiConfirmTemplate(template) {
   const response = await fetch(url, {
     method: "POST",
     headers: {
-      "botnoi-token": botnoiConfig.token,
+      "botnoi-token": config.botnoi.token,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(template),
@@ -293,7 +286,7 @@ async function createBotnoiConfirmTemplate(template) {
 
 async function sendBotnoiOutboundCall(payload) {
   const url = getBotnoiOutboundCallUrl();
-  if (!url || !botnoiConfig.token) {
+  if (!url || !config.botnoi.token) {
     return {
       skipped: true,
       reason: "BOTNOI_OUTBOUND_CALL_URL or BOTNOI_API_BASE_URL and BOTNOI_TOKEN are required",
@@ -303,7 +296,7 @@ async function sendBotnoiOutboundCall(payload) {
   const response = await fetch(url, {
     method: "POST",
     headers: {
-      "botnoi-token": botnoiConfig.token,
+      "botnoi-token": config.botnoi.token,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(payload),
@@ -369,53 +362,48 @@ function pickBotnoiAudio(payload) {
 }
 
 async function synthesizeBotnoiSpeech(text) {
-  if (!botnoiConfig.ttsUrl || !botnoiConfig.token) {
+  if (!config.botnoi.ttsUrl || !config.botnoi.token) {
     return {
       skipped: true,
       reason: "BOTNOI_TTS_URL and BOTNOI_TOKEN are required",
     };
   }
 
-  const response = await fetch(botnoiConfig.ttsUrl, {
+  const response = await fetch(config.botnoi.ttsUrl, {
     method: "POST",
     headers: {
-      "botnoi-token": botnoiConfig.token,
+      "botnoi-token": config.botnoi.token, // ✅ header ตรงกับ API docs
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
       text,
-      message: text,
-      speaker_id: botnoiConfig.speakerId,
+      speaker: config.botnoi.speakerId, // "1" หรือ speakerId ที่ตั้งไว้
+      volume: 1,
+      speed: 1,
+      type_media: "mp3",
+      save_file: "true",
+      language: "th",
+      page: "user",
     }),
   });
 
   const contentType = response.headers.get("content-type") ?? "";
   if (contentType.startsWith("audio/")) {
     const buffer = Buffer.from(await response.arrayBuffer());
-    if (!response.ok) {
-      throw new Error(`Botnoi TTS API error: ${response.status}`);
-    }
     return {
       audioBase64: buffer.toString("base64"),
       mimeType: contentType,
     };
   }
 
-  const textResponse = await response.text();
-  let payload = textResponse;
-  try {
-    payload = JSON.parse(textResponse);
-  } catch {
-    // Some APIs return plain text on errors.
-  }
-
+  const payload = await response.json();
   if (!response.ok) {
-    throw new Error(`Botnoi TTS API error: ${response.status} ${typeof payload === "string" ? payload : JSON.stringify(payload)}`);
+    throw new Error(`Botnoi TTS error: ${response.status} ${JSON.stringify(payload)}`);
   }
 
   const audio = pickBotnoiAudio(payload);
   if (!audio.audioUrl && !audio.audioBase64) {
-    throw new Error("Botnoi TTS API did not return audio_url or audio_base64");
+    throw new Error("Botnoi TTS did not return audio");
   }
 
   return audio;
@@ -678,7 +666,7 @@ function buildSummary(booking) {
 }
 
 async function handleAiBooking(req, res, options = {}) {
-  const { requireBotnoi = false } = options;
+  const { requireBotnoi = false, stream = false } = options;
   const { message = "", sessionId = "default", hotelName = "" } = await parseBody(req);
   const currentBooking = {
     ...(sessions.get(sessionId) ?? emptyBooking()),
@@ -696,6 +684,29 @@ async function handleAiBooking(req, res, options = {}) {
   if (currentBooking.status === "awaiting_confirmation" && /^(ยืนยัน|ตกลง|confirm|ok|โอเค)/i.test(normalizedMessage)) {
     const savedBooking = await saveBooking(currentBooking);
     sessions.set(sessionId, emptyBooking());
+    
+    if (stream) {
+      // Send streaming response for confirmation
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "Access-Control-Allow-Origin": "*",
+      });
+      const reply = `จองเรียบร้อยค่ะ หมายเลขการจอง ${savedBooking.id}`;
+      // Simulate streaming by sending chunks
+      const chunks = reply.split("");
+      for (const chunk of chunks) {
+        res.write(`data: ${JSON.stringify({ text: chunk })}
+\n`);
+        await new Promise((resolve) => setTimeout(resolve, 30)); // 30ms delay per char
+      }
+      res.write(`data: ${JSON.stringify({ done: true, saved: true, booking: savedBooking })}
+\n`);
+      res.end();
+      return;
+    }
+    
     sendJson(res, 200, {
       reply: `จองเรียบร้อยค่ะ หมายเลขการจอง ${savedBooking.id}`,
       booking: savedBooking,
@@ -732,10 +743,34 @@ async function handleAiBooking(req, res, options = {}) {
     return;
   }
 
+  // Determine the reply text
+  let replyText;
   if (missingField) {
     sessions.set(sessionId, { ...booking, status: "collecting" });
+    replyText = botnoiReply || buildQuestion(booking);
+    
+    if (stream) {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "Access-Control-Allow-Origin": "*",
+      });
+      // Simulate streaming
+      const chunks = replyText.split("");
+      for (const chunk of chunks) {
+        res.write(`data: ${JSON.stringify({ text: chunk })}
+\n`);
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      }
+      res.write(`data: ${JSON.stringify({ done: true, saved: false, booking: { ...booking, status: "collecting" } })}
+\n`);
+      res.end();
+      return;
+    }
+    
     sendJson(res, 200, {
-      reply: botnoiReply || buildQuestion(booking),
+      reply: replyText,
       booking: { ...booking, status: "collecting" },
       saved: false,
     });
@@ -744,11 +779,38 @@ async function handleAiBooking(req, res, options = {}) {
 
   const awaitingBooking = { ...booking, status: "awaiting_confirmation" };
   sessions.set(sessionId, awaitingBooking);
+  replyText = botnoiReply || buildSummary(awaitingBooking);
+  
+  if (stream) {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "Access-Control-Allow-Origin": "*",
+    });
+    // Simulate streaming
+    const chunks = replyText.split("");
+    for (const chunk of chunks) {
+      res.write(`data: ${JSON.stringify({ text: chunk })}
+\n`);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    res.write(`data: ${JSON.stringify({ done: true, saved: false, booking: awaitingBooking })}
+\n`);
+    res.end();
+    return;
+  }
+  
   sendJson(res, 200, {
-    reply: botnoiReply || buildSummary(awaitingBooking),
+    reply: replyText,
     booking: awaitingBooking,
     saved: false,
   });
+}
+
+// Streaming endpoint handler
+async function handleAiBookingStream(req, res) {
+  await handleAiBooking(req, res, { stream: true });
 }
 
 async function handleBotnoiBooking(req, res) {
@@ -839,6 +901,11 @@ async function requestHandler(req, res) {
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/api/ai/booking/stream") {
+      await handleAiBookingStream(req, res);
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/ai/hotel-recommendation") {
       await handleHotelRecommendation(req, res);
       return;
@@ -872,13 +939,15 @@ async function requestHandler(req, res) {
 
 await ensureDatabase();
 
-const port = Number(process.env.PORT ?? 3001);
+// แก้เป็น
 const app = express();
 
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
-app.use(requestHandler);
 
-app.listen(port, () => {
-  console.log(`AI booking backend is running on http://localhost:${port}`);
+app.use("/api/health", health);
+app.use(requestHandler); // ยังเก็บ requestHandler ไว้ก่อน จะค่อยๆ ย้ายทีหลัง
+
+app.listen(config.port, () => {
+  console.log(`Server running on http://localhost:${config.port}`);
 });

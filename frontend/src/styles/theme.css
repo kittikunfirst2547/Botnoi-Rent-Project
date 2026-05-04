@@ -31,10 +31,10 @@
   --ring: #a8a29e;
   --radius: 0.75rem;
 
-  /* Accent - warm teal */
-  --accent-brand: #0d9488;
-  --accent-brand-light: #ccfbf1;
-  --accent-brand-hover: #0f766e;
+  /* Accent - neutral slate */
+  --accent-brand: #475569;
+  --accent-brand-light: #f1f5f9;
+  --accent-brand-hover: #334155;
 }
 
 .dark {
@@ -58,9 +58,9 @@
   --input: #292524;
   --ring: #57534e;
 
-  --accent-brand: #2dd4bf;
-  --accent-brand-light: #042f2e;
-  --accent-brand-hover: #5eead4;
+  --accent-brand: #94a3b8;
+  --accent-brand-light: #1e293b;
+  --accent-brand-hover: #cbd5e1;
 }
 
 @theme inline {

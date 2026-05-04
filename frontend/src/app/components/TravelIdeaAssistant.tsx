@@ -1,8 +1,10 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Link from "next/link";
 import { Loader2, Mic, MicOff, Send, Sparkles, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import { getHotelByName } from "../../data/hotels";
 
 type TravelSpeechRecognitionConstructor = new () => TravelSpeechRecognition;
 
@@ -179,35 +181,57 @@ export function TravelIdeaAssistant({ onBook }: TravelIdeaAssistantProps) {
 
               {recommendations.length > 0 && (
                 <div className="space-y-2">
-                  {recommendations.map((hotel) => (
-                    <div key={hotel.name} className="rounded-xl border border-[var(--border)] p-3.5 transition-colors hover:border-[var(--accent-brand)]/40">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <h3 className="text-sm font-semibold text-[var(--foreground)]">{hotel.name}</h3>
-                          <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">{hotel.location}</p>
+                  {recommendations.map((hotel) => {
+                    const hotelData = getHotelByName(hotel.name);
+                    const hotelId = hotelData?.id;
+
+                    const CardContent = (
+                      <div className="rounded-xl border border-[var(--border)] p-3.5 transition-colors hover:border-[var(--accent-brand)]/40 bg-[var(--card)]">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <h3 className="text-sm font-semibold text-[var(--foreground)] truncate">{hotel.name}</h3>
+                            <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">{hotel.location}</p>
+                          </div>
+                          <span className="shrink-0 text-sm font-semibold text-[var(--accent-brand)]">
+                            ฿{hotel.price.toLocaleString()}
+                          </span>
                         </div>
-                        <span className="shrink-0 text-sm font-semibold text-[var(--accent-brand)]">
-                          ฿{hotel.price.toLocaleString()}
-                        </span>
+                        <ul className="mt-2 space-y-0.5 text-xs text-[var(--muted-foreground)]">
+                          {hotel.reasons.slice(0, 2).map((reason) => (
+                            <li key={reason}>• {reason}</li>
+                          ))}
+                        </ul>
+                        {onBook && (
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              onBook(hotel.name);
+                              closePanel();
+                            }}
+                            className="mt-2.5 w-full rounded-lg bg-[var(--accent-brand)] px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-[var(--accent-brand-hover)]"
+                          >
+                            จองเลย
+                          </button>
+                        )}
                       </div>
-                      <ul className="mt-2 space-y-0.5 text-xs text-[var(--muted-foreground)]">
-                        {hotel.reasons.slice(0, 2).map((reason) => (
-                          <li key={reason}>• {reason}</li>
-                        ))}
-                      </ul>
-                      {onBook && (
-                        <button
-                          onClick={() => {
-                            onBook(hotel.name);
-                            closePanel();
-                          }}
-                          className="mt-2.5 w-full rounded-lg bg-[var(--accent-brand)] px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-[var(--accent-brand-hover)]"
-                        >
-                          จองเลย
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                    );
+
+                    return hotelId ? (
+                      <Link
+                        key={hotel.name}
+                        href={`/hotel/${hotelId}`}
+                        onClick={closePanel}
+                        className="block cursor-pointer"
+                      >
+                        {CardContent}
+                      </Link>
+                    ) : (
+                      <div key={hotel.name}>
+                        {CardContent}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 

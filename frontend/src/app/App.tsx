@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useTheme } from "next-themes";
 import Link from "next/link";
 import { Sparkles, Sun, Moon, ArrowRight } from "lucide-react";
 import { motion } from "motion/react";
@@ -17,26 +18,25 @@ import { TravelIdeaAssistant } from "./components/TravelIdeaAssistant";
 export default function App() {
   const [selectedHotel, setSelectedHotel] = useState<string | null>(null);
   const [bookingMode, setBookingMode] = useState<"choice" | "voice" | "form" | null>(null);
-  const [darkMode, setDarkMode] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const { resolvedTheme, setTheme } = useTheme();
 
   useEffect(() => {
-    const saved = localStorage.getItem("theme");
-    if (saved === "dark") setDarkMode(true);
     setMounted(true);
   }, []);
 
-  useEffect(() => {
-    if (!mounted) return;
-    const root = document.documentElement;
-    if (darkMode) {
-      root.classList.add("dark");
-      localStorage.setItem("theme", "dark");
-    } else {
-      root.classList.remove("dark");
-      localStorage.setItem("theme", "light");
-    }
-  }, [darkMode, mounted]);
+  if (!mounted) {
+    return (
+      <div className="min-h-screen bg-[var(--background)]">
+        <div className="mx-auto max-w-6xl px-6 py-12">
+          <div className="animate-pulse space-y-4">
+            <div className="h-8 w-32 bg-[var(--muted)] rounded" />
+            <div className="h-64 bg-[var(--muted)] rounded-xl" />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const handleBooking = (hotelId: string) => {
     setSelectedHotel(hotelId);
@@ -92,15 +92,13 @@ export default function App() {
                 ))}
               </nav>
 
-              {mounted && (
-                <button
-                  onClick={() => setDarkMode(!darkMode)}
-                  className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--muted)] text-[var(--muted-foreground)] transition-all duration-200 hover:bg-[var(--border)] hover:text-[var(--foreground)]"
-                  aria-label="Toggle dark mode"
-                >
-                  {darkMode ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
-                </button>
-              )}
+              <button
+                onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+                className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--muted)] text-[var(--muted-foreground)] transition-all duration-200 hover:bg-[var(--border)] hover:text-[var(--foreground)]"
+                aria-label="Toggle dark mode"
+              >
+                {resolvedTheme === "dark" ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
+              </button>
             </div>
           </div>
         </div>
