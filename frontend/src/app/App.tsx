@@ -77,18 +77,22 @@ export default function App() {
 
             <div className="flex items-center gap-6">
               <nav className="hidden items-center gap-6 md:flex">
-                {["โรงแรม", "โปรโมชัน", "เกี่ยวกับเรา"].map((label, i) => (
-                  <a
-                    key={label}
-                    href="#"
-                    className={`text-sm transition-colors duration-200 ${
-                      i === 0
+                {[
+                  { label: "โรงแรม", href: "/" },
+                  { label: "โปรโมชัน", href: "/promotions" },
+                  { label: "เกี่ยวกับเรา", href: "/about" },
+                ].map((item) => (
+                  <Link
+                    key={item.label}
+                    href={item.href}
+                    className={`text-sm no-underline transition-colors duration-200 ${
+                      item.label === "โรงแรม"
                         ? "font-medium text-[var(--foreground)]"
                         : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
                     }`}
                   >
-                    {label}
-                  </a>
+                    {item.label}
+                  </Link>
                 ))}
               </nav>
 
@@ -200,21 +204,33 @@ export default function App() {
               </p>
             </div>
             {[
-              { title: "บริการ", links: ["จองโรงแรม", "AI Assistant", "โปรโมชัน"] },
-              { title: "บริษัท", links: ["เกี่ยวกับเรา", "ติดต่อเรา", "ร่วมงานกับเรา"] },
-              { title: "ช่วยเหลือ", links: ["ศูนย์ช่วยเหลือ", "นโยบายความเป็นส่วนตัว", "เงื่อนไขการใช้งาน"] },
+              { title: "บริการ", links: [
+                { label: "จองโรงแรม", href: "/" },
+                { label: "AI Assistant", href: "/" },
+                { label: "โปรโมชัน", href: "/promotions" },
+              ]},
+              { title: "บริษัท", links: [
+                { label: "เกี่ยวกับเรา", href: "/about" },
+                { label: "ติดต่อเรา", href: "#" },
+                { label: "ร่วมงานกับเรา", href: "#" },
+              ]},
+              { title: "ช่วยเหลือ", links: [
+                { label: "ศูนย์ช่วยเหลือ", href: "#" },
+                { label: "นโยบายความเป็นส่วนตัว", href: "#" },
+                { label: "เงื่อนไขการใช้งาน", href: "#" },
+              ]},
             ].map((section) => (
               <div key={section.title}>
                 <h5 className="mb-3 text-sm font-medium text-[var(--foreground)]">{section.title}</h5>
                 <ul className="space-y-2">
                   {section.links.map((link) => (
-                    <li key={link}>
-                      <a
-                        href="#"
-                        className="text-sm text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)]"
+                    <li key={link.label}>
+                      <Link
+                        href={link.href}
+                        className="text-sm text-[var(--muted-foreground)] no-underline transition-colors hover:text-[var(--foreground)]"
                       >
-                        {link}
-                      </a>
+                        {link.label}
+                      </Link>
                     </li>
                   ))}
                 </ul>
