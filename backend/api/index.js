@@ -252,8 +252,25 @@ function extractBooking(message, currentBooking) {
   const phoneMatch = text.match(/0\d[\d\s-]{7,12}\d/);
   if (phoneMatch) booking.phone = phoneMatch[0].replace(/\D/g, "");
 
-  const nameMatch = text.match(/(?:ชื่อ|ผมชื่อ|ฉันชื่อ|ดิฉันชื่อ)\s*([ก-๙A-Za-z ]{2,40})(?:\s+เบอร์|\s+โทร|\s+พัก|\s*$)/);
-  if (nameMatch) booking.customerName = nameMatch[1].trim();
+  // ✅ ใหม่
+if (getMissingField(currentBooking) === "customerName" || !booking.customerName) {
+  // รูปแบบที่ 1: มีคำนำหน้าชื่อ
+  const nameMatch = text.match(
+    /(?:ชื่อ|ผมชื่อ|ฉันชื่อ|ดิฉันชื่อ|หนูชื่อ|เรียกว่า)\s*([ก-๙A-Za-z][ก-๙A-Za-z\s.'-]{1,39})(?:\s+เบอร์|\s+โทร|\s+พัก|\s*$)/
+  );
+  if (nameMatch) {
+    booking.customerName = nameMatch[1].trim();
+  } else {
+    // รูปแบบที่ 2: พูด/พิมพ์ชื่อล้วนๆ
+    const cleanedText = text
+      .replace(/^(คุณ|ครับ|ค่ะ|ผม|ดิฉัน|ฉัน|หนู)\s+/g, "")
+      .replace(/\s*(ครับ|ค่ะ|จ้า|จ้ะ|นะคะ|นะครับ|เอ่อ|อ่า|หืม|ฮืม)$/g, "")
+      .trim();
+    if (looksLikePlainCustomerName(cleanedText)) {
+      booking.customerName = cleanedText;
+    }
+  }
+}
 
   return booking;
 }
