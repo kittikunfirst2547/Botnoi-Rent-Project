@@ -49,6 +49,7 @@ interface TravelIdeaAssistantProps {
 }
 
 const introMessage = "ยังไม่รู้จะไปไหนดีใช่ไหมคะ กดไมค์แล้วบอกโจทย์มาได้เลย เช่น อยากไปภูเก็ต ใกล้ทะเล เงียบ ๆ";
+const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? '').replace(/\/$/, '');
 
 export function TravelIdeaAssistant({ onBook }: TravelIdeaAssistantProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -68,7 +69,7 @@ export function TravelIdeaAssistant({ onBook }: TravelIdeaAssistantProps) {
     setReply("กำลังหาโรงแรมที่เหมาะกับคุณ...");
 
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/ai/hotel-recommendation`, {
+      const response = await fetch(`${API_URL}/api/ai/hotel-recommendation`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

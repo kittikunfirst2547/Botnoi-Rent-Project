@@ -56,7 +56,7 @@ declare global {
     webkitSpeechRecognition?: SpeechRecognitionConstructor;
   }
 }
-
+const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? '').replace(/\/$/, '');
 const fallbackSessionId = crypto.randomUUID();
 
 export function VoiceBookingAssistant() {
@@ -107,7 +107,7 @@ export function VoiceBookingAssistant() {
     setIsSending(true);
 
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/ai/booking`, {
+      const response = await fetch(`${API_URL}/api/ai/booking`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
