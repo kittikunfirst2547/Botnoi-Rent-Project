@@ -442,9 +442,6 @@ function parseBody(req) {
 
 function sendJson(res, statusCode, payload) {
   res.writeHead(statusCode, {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
     "Content-Type": "application/json; charset=utf-8",
   });
   res.end(JSON.stringify(payload));
