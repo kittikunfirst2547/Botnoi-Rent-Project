@@ -625,11 +625,22 @@ function extractBooking(message, currentBooking) {
   const phoneMatch = text.match(/0\d[\d\s-]{7,12}\d/);
   if (phoneMatch) booking.phone = phoneMatch[0].replace(/\D/g, "");
 
+  // Name extraction with prefix patterns
   const nameMatch = text.match(/(?:ชื่อ|ผมชื่อ|ฉันชื่อ|ดิฉันชื่อ)\s*([ก-๙A-Za-z ]{2,40})(?:\s+เบอร์|\s+โทร|\s+พัก|\s*$)/);
   if (nameMatch) booking.customerName = nameMatch[1].trim();
 
-  if (!booking.customerName && getMissingField(currentBooking) === "customerName" && looksLikePlainCustomerName(text)) {
-    booking.customerName = text.trim();
+  // Extract name from speech with filler words (e.g., "คุณครับ First คิดฉูด")
+  if (!booking.customerName && getMissingField(currentBooking) === "customerName") {
+    // Remove common filler words and speech artifacts
+    const cleanedText = text
+      .replace(/^(คุณ|ครับ|ค่ะ|ผม|ดิฉัน|ฉัน)\s+/g, "") // Remove prefixes
+      .replace(/\s+(ครับ|ค่ะ|คิดฉูด|คิด|ฉูด|เอ่อ|อ่า|หืม|ฮืม)$/g, "") // Remove suffixes
+      .replace(/\s+(ครับ|ค่ะ|คิดฉูด|คิด|ฉูด|เอ่อ|อ่า)\s+/g, " ") // Remove in the middle
+      .trim();
+    
+    if (looksLikePlainCustomerName(cleanedText)) {
+      booking.customerName = cleanedText;
+    }
   }
 
   return booking;
