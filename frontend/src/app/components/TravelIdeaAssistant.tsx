@@ -68,7 +68,7 @@ export function TravelIdeaAssistant({ onBook }: TravelIdeaAssistantProps) {
     setReply("กำลังหาโรงแรมที่เหมาะกับคุณ...");
 
     try {
-      const response = await fetch("/api/ai/hotel-recommendation", {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/ai/hotel-recommendation`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

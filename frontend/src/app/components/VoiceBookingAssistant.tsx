@@ -107,7 +107,7 @@ export function VoiceBookingAssistant() {
     setIsSending(true);
 
     try {
-      const response = await fetch("/api/ai/booking", {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/ai/booking`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

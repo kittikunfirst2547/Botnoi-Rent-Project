@@ -16,6 +16,7 @@ const bookingsFile = join(dataDir, "bookings.json");
 const bookingsSqliteFile = join(dataDir, "bookings.sqlite");
 let bookingsDb;
 const sessions = new Map();
+const cors = require('cors')
 
 function loadEnvFile() {
   const envFile = join(__dirname, "../.env");
@@ -942,7 +943,9 @@ await ensureDatabase();
 // แก้เป็น
 const app = express();
 
-app.use(cors());
+app.use(cors({
+  origin: 'https://botnoi-rent-project-frontend.vercel.app'
+}))
 app.use(express.json({ limit: "1mb" }));
 
 app.use("/api/health", health);

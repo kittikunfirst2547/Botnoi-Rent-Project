@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Mic, MicOff, Minus, PhoneOff, Send, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 
+
+const API = process.env.NEXT_PUBLIC_API_URL;
+
 type SpeechRecognitionConstructor = new () => SpeechRecognition;
 
 interface SpeechRecognition extends EventTarget {
@@ -79,6 +82,7 @@ declare global {
   }
 }
 
+
 const createId = () => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
@@ -144,7 +148,7 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
 
   const playBotnoiVoice = async (text: string) => {
     try {
-      const response = await fetch("/api/botnoi/tts", {
+      const response = await fetch(`${API}/api/botnoi/tts`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -201,7 +205,7 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
 
   try {
     if (useStreaming) {
-      const response = await fetch("/api/ai/booking/stream", {
+      const response = await fetch(`${API}/api/ai/booking/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message, sessionId, hotelName, price }),
@@ -257,7 +261,7 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
 
     } else {
       // non-streaming fallback
-      const response = await fetch("/api/ai/booking", {
+      const response = await fetch(`${API}/api/ai/booking`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message, sessionId, hotelName, price }),
