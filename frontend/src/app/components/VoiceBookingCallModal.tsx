@@ -107,6 +107,7 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
   const keepListeningRef = useRef(false);
   const handledSpeechErrorRef = useRef(false);
   const autoRestartRef = useRef(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const sessionId = useMemo(() => createId(), []);
 
   const addMessage = (sender: ConversationMessage["sender"], text: string) => {
@@ -170,9 +171,16 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
       if (!source) throw new Error("Botnoi voice did not return audio");
 
       setCallStatus("กำลังเล่นเสียง...");
+      // Stop any playing audio first
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
       const audio = new Audio(source);
+      audioRef.current = audio;
       audio.onended = () => {
         setCallStatus("กำลังคุยอยู่");
+        audioRef.current = null;
         // Auto-restart listening after AI finishes speaking
         if (autoRestartRef.current && !isMinimized) {
           setTimeout(() => {
@@ -373,9 +381,33 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
   };
 
   const closeCall = () => {
+    // Stop all audio and speech
     keepListeningRef.current = false;
     recognitionRef.current?.stop();
     window.speechSynthesis?.cancel();
+    
+    // Stop playing audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    
+    // Reset all state
+    setMessages([
+      {
+        id: "welcome",
+        sender: "ai",
+        text: `สวัสดีค่ะ กำลังจอง ${hotelName} ให้คุณอยู่ บอกวันเช็คอิน เช็คเอาท์ จำนวนผู้เข้าพัก ชื่อ และเบอร์โทรได้เลยค่ะ`,
+      },
+    ]);
+    setManualText("");
+    setIsListening(false);
+    setIsSending(false);
+    setCallStatus("พร้อมคุยกับ AI");
+    setIsMinimized(false);
+    autoRestartRef.current = false;
+    handledSpeechErrorRef.current = false;
+    
     onClose();
   };
 

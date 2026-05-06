@@ -952,7 +952,10 @@ await ensureDatabase();
 const app = express();
 
 app.use(cors({
-  origin: 'https://botnoi-rent-project-frontend.vercel.app'
+  origin: 'https://botnoi-rent-project-frontend.vercel.app',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  credentials: true
 }))
 app.use(express.json({ limit: "1mb" }));
 
