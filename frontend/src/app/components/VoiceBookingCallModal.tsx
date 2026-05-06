@@ -2,8 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Mic, MicOff, Minus, PhoneOff, Send, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 
-
-const API = process.env.NEXT_PUBLIC_API_URL;
+const API = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '')
 
 type SpeechRecognitionConstructor = new () => SpeechRecognition;
 
