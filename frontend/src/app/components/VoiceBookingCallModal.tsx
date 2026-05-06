@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Mic, MicOff, Minus, PhoneOff, Send, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 
@@ -103,11 +103,22 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const keepListeningRef = useRef(false);
   const handledSpeechErrorRef = useRef(false);
+  const autoRestartRef = useRef(false);
   const sessionId = useMemo(() => createId(), []);
 
   const addMessage = (sender: ConversationMessage["sender"], text: string) => {
     setMessages((current) => [...current, { id: createId(), sender, text }]);
   };
+
+  // Auto-start listening when modal opens
+  useEffect(() => {
+    if (isOpen && !isSpeechUnavailable) {
+      const timer = setTimeout(() => {
+        startListening();
+      }, 1000); // Delay 1 second after modal opens
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen]);
 
   const speak = (text: string) => {
     void playBotnoiVoice(text);
@@ -120,6 +131,14 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = "th-TH";
     utterance.rate = 0.96;
+    utterance.onend = () => {
+      // Auto-restart listening after browser TTS finishes
+      if (autoRestartRef.current && !isMinimized) {
+        setTimeout(() => {
+          startListening();
+        }, 500);
+      }
+    };
     window.speechSynthesis.speak(utterance);
   };
 
@@ -149,7 +168,15 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
 
       setCallStatus("กำลังเล่นเสียง...");
       const audio = new Audio(source);
-      audio.onended = () => setCallStatus("กำลังคุยอยู่");
+      audio.onended = () => {
+        setCallStatus("กำลังคุยอยู่");
+        // Auto-restart listening after AI finishes speaking
+        if (autoRestartRef.current && !isMinimized) {
+          setTimeout(() => {
+            startListening();
+          }, 500); // Small delay before restarting
+        }
+      };
       await audio.play();
     } catch {
       playBrowserVoice(text);
@@ -284,6 +311,9 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
       handledSpeechErrorRef.current = true;
       const transcript = event.results[0][0].transcript;
       setCallStatus(`ได้ยินว่า: ${transcript}`);
+      // Stop listening when speech detected, will auto-restart after AI responds
+      stopListening();
+      autoRestartRef.current = true;
       void sendToBotnoi(transcript);
     };
     recognition.onend = () => {

@@ -12,14 +12,15 @@ import { SearchBar } from "./components/SearchBar";
 import { BookingModal } from "./components/BookingModal";
 import { BotnoiChat } from "./components/BotnoiChat";
 import { BookingChoiceModal } from "./components/BookingChoiceModal";
-import { VoiceBookingCallModal } from "./components/VoiceBookingCallModal";
 import { TravelIdeaAssistant } from "./components/TravelIdeaAssistant";
+import { useVoiceBooking } from "../context/VoiceBookingContext";
 
 export default function App() {
   const [selectedHotel, setSelectedHotel] = useState<string | null>(null);
-  const [bookingMode, setBookingMode] = useState<"choice" | "voice" | "form" | null>(null);
+  const [bookingMode, setBookingMode] = useState<"choice" | "form" | null>(null);
   const [mounted, setMounted] = useState(false);
   const { resolvedTheme, setTheme } = useTheme();
+  const { openVoiceBooking } = useVoiceBooking();
 
   useEffect(() => {
     setMounted(true);
@@ -234,16 +235,15 @@ export default function App() {
         <>
           <BookingChoiceModal
             isOpen={bookingMode === "choice"}
-            hotelName={selectedHotelData.name}
+            hotelName={selectedHotelData?.name ?? ""}
             onClose={closeBooking}
-            onSelectVoice={() => setBookingMode("voice")}
+            onSelectVoice={() => {
+              if (selectedHotelData) {
+                openVoiceBooking(selectedHotelData.name, selectedHotelData.price);
+              }
+              closeBooking();
+            }}
             onSelectForm={() => setBookingMode("form")}
-          />
-          <VoiceBookingCallModal
-            isOpen={bookingMode === "voice"}
-            onClose={closeBooking}
-            hotelName={selectedHotelData.name}
-            price={selectedHotelData.price}
           />
           <BookingModal
             isOpen={bookingMode === "form"}

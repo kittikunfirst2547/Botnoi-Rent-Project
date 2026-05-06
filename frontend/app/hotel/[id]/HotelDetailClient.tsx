@@ -28,8 +28,8 @@ import { motion } from "motion/react";
 import type { Hotel } from "../../../src/data/hotels";
 import { BookingChoiceModal } from "../../../src/app/components/BookingChoiceModal";
 import { BookingModal } from "../../../src/app/components/BookingModal";
-import { VoiceBookingCallModal } from "../../../src/app/components/VoiceBookingCallModal";
 import { ImageGalleryModal } from "../../../src/app/components/ImageGalleryModal";
+import { useVoiceBooking } from "../../../src/context/VoiceBookingContext";
 import useEmblaCarousel from "embla-carousel-react";
 import { ChevronLeft, ChevronRight, Grid3X3 } from "lucide-react";
 
@@ -186,7 +186,8 @@ function HotelImageSlider({ images, hotelName, onOpenGallery }: HotelImageSlider
   );
 }
 export default function HotelDetailClient({ hotel }: { hotel: Hotel }) {
-  const [bookingMode, setBookingMode] = useState<"choice" | "voice" | "form" | null>(null);
+  const [bookingMode, setBookingMode] = useState<"choice" | "form" | null>(null);
+  const { openVoiceBooking } = useVoiceBooking();
   const [activeImage, setActiveImage] = useState(0);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -486,14 +487,11 @@ export default function HotelDetailClient({ hotel }: { hotel: Hotel }) {
         isOpen={bookingMode === "choice"}
         hotelName={hotel.name}
         onClose={() => setBookingMode(null)}
-        onSelectVoice={() => setBookingMode("voice")}
+        onSelectVoice={() => {
+          openVoiceBooking(hotel.name, hotel.price);
+          setBookingMode(null);
+        }}
         onSelectForm={() => setBookingMode("form")}
-      />
-      <VoiceBookingCallModal
-        isOpen={bookingMode === "voice"}
-        onClose={() => setBookingMode(null)}
-        hotelName={hotel.name}
-        price={hotel.price}
       />
       <BookingModal
         isOpen={bookingMode === "form"}
