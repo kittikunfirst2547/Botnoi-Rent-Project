@@ -813,6 +813,7 @@ const app = express();
 // ✅ CORS — ต้องอยู่บนสุด ก่อนทุก middleware และ route
 app.use(cors({
   origin: [
+    "http://localhost:3000",
     "https://botnoi-rent-project-frontend.vercel.app",
     "https://botnoi-rent-project-frontend-ilzc.vercel.app",
   ],
