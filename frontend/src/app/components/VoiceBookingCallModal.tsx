@@ -388,6 +388,7 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
     
     // Stop playing audio
     if (audioRef.current) {
+      audioRef.current.onended = null; // Prevent auto-restart callback
       audioRef.current.pause();
       audioRef.current = null;
     }

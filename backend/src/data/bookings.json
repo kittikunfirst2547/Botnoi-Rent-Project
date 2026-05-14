@@ -82,5 +82,17 @@
     "phone": "0872433261",
     "status": "confirmed",
     "createdAt": "2026-05-07T08:48:42.625Z"
+  },
+  {
+    "id": "a98f816a-482f-4abe-8ef8-da02f83ae13a",
+    "hotelName": "Anantara Siam Resort & Spa",
+    "location": "",
+    "checkIn": "2026-05-15",
+    "checkOut": "2026-05-16",
+    "guests": 3,
+    "customerName": "ปีเตอร์เดนแมน",
+    "phone": "0934715678",
+    "status": "confirmed",
+    "createdAt": "2026-05-07T09:30:40.080Z"
   }
 ]

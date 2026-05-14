@@ -68,7 +68,28 @@ cp .env.example .env
 
 จากนั้นใส่ค่า Botnoi API ที่ต้องใช้ใน `.env` เช่น `BOTNOI_TOKEN`, `BOTNOI_API_URL`, `BOTNOI_TTS_URL` และค่าอื่น ๆ ตามที่ทีมได้รับมา
 
+ถ้าต้องการเปิด AI booking assistant แบบใช้ฟรี ให้เพิ่มค่าเหล่านี้ใน `backend/.env`:
+
+```bash
+GROQ_API_KEY=your_groq_key
+GROQ_MODEL=llama-3.1-8b-instant
+GROQ_TIMEOUT_MS=10000
+AI_EXTRACTION_MODE=always
+OPENROUTER_API_KEY=your_openrouter_key
+OPENROUTER_MODEL=meta-llama/llama-3.2-3b-instruct:free
+OPENROUTER_TIMEOUT_MS=10000
+OPENROUTER_RATE_LIMIT_COOLDOWN_MS=600000
+```
+
+ถ้ามี `GROQ_API_KEY` ระบบจะใช้ Groq ก่อน เพราะ free models ของ OpenRouter อาจโดน upstream rate limit ได้บ่อย จากนั้นค่อย fallback ไป OpenRouter ถ้า Groq ใช้ไม่ได้
+ค่า `AI_EXTRACTION_MODE=always` จะให้ AI ช่วยดึงข้อมูลทุกข้อความ ส่วนคำตอบที่แสดงกับลูกค้ายังเป็น flow สั้น ๆ ของ backend เพื่อกัน AI ตอบมั่ว
+ค่า `OPENROUTER_MODEL` สามารถใส่ได้หลายโมเดลโดยคั่นด้วย comma ระบบจะลองตามลำดับ เช่นโมเดลที่ลงท้ายด้วย `:free`
+ค่า `OPENROUTER_TIMEOUT_MS` คือเวลารอ AI สูงสุด หน่วยเป็นมิลลิวินาที ถ้า AI ช้าเกินนี้ระบบจะใช้ flow สั้น ๆ ของ backend แทน
+ค่า `OPENROUTER_RATE_LIMIT_COOLDOWN_MS` คือเวลาพักการเรียก OpenRouter หลังเจอ rate limit เพื่อไม่ให้ยิงซ้ำจนเสีย quota เพิ่ม
+
 > ถ้ายังไม่ได้ใส่ค่า Botnoi บางตัว ระบบ backend ยังรันได้ แต่ endpoint ที่ต้องเรียก Botnoi จริงอาจตอบกลับว่า config ยังไม่ครบ
+
+> ตอนนี้ backend จะพยายามใช้ `OpenRouter` ก่อน ถ้าไม่มี `OPENROUTER_API_KEY` จะ fallback ไป `GEMINI_API_KEY` และถ้าไม่มีทั้งคู่จะใช้ rule-based flow
 
 ### Run Backend
 
@@ -91,7 +112,7 @@ curl http://localhost:3001/api/health
 ควรได้ response ประมาณนี้:
 
 ```json
-{"ok":true}
+{"ok":true,"ai":"openrouter"}
 ```
 
 ### Run Frontend

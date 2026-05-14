@@ -41,6 +41,193 @@ const config = {
   },
 };
 
+const openRouterApiKey = process.env.OPENROUTER_API_KEY ?? "";
+const openRouterModel = process.env.OPENROUTER_MODEL ?? "meta-llama/llama-3.2-3b-instruct:free";
+const openRouterModels = openRouterModel
+  .split(",")
+  .map((model) => model.trim())
+  .filter(Boolean);
+const openRouterApiUrl = process.env.OPENROUTER_API_URL ?? "https://openrouter.ai/api/v1/chat/completions";
+const openRouterTimeoutMs = Number(process.env.OPENROUTER_TIMEOUT_MS ?? 10000);
+const openRouterRateLimitCooldownMs = Number(process.env.OPENROUTER_RATE_LIMIT_COOLDOWN_MS ?? 600000);
+const aiMode = openRouterApiKey ? "openrouter" : "rule-based";
+let openRouterUnavailableUntil = 0;
+let lastOpenRouterError = "";
+const groqApiKey = process.env.GROQ_API_KEY ?? "";
+const groqModel = process.env.GROQ_MODEL ?? "llama-3.1-8b-instant";
+const groqApiUrl = process.env.GROQ_API_URL ?? "https://api.groq.com/openai/v1/chat/completions";
+const groqTimeoutMs = Number(process.env.GROQ_TIMEOUT_MS ?? 10000);
+let lastGroqError = "";
+const aiExtractionMode = process.env.AI_EXTRACTION_MODE ?? "always";
+const activeAiMode = groqApiKey ? "groq" : aiMode;
+
+async function chatWithGroq(prompt) {
+  if (!groqApiKey) return "";
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), groqTimeoutMs);
+
+  try {
+    const response = await fetch(groqApiUrl, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${groqApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: groqModel,
+        temperature: 0,
+        max_tokens: 180,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+
+    if (!response.ok) {
+      let errorMessage = `Groq HTTP ${response.status}`;
+      try {
+        const errorBody = await response.json();
+        errorMessage = errorBody?.error?.message || errorMessage;
+      } catch {
+        // Keep the HTTP status when Groq returns a non-JSON error page.
+      }
+
+      lastGroqError = errorMessage;
+      throw new Error(errorMessage);
+    }
+
+    const data = await response.json();
+    lastGroqError = "";
+    return data?.choices?.[0]?.message?.content?.trim?.() ?? "";
+  } catch (err) {
+    console.warn("Groq chat failed:", err.message);
+    return "";
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function generateAiText(prompt) {
+  const groqReply = await chatWithGroq(prompt);
+  if (groqReply) return groqReply;
+
+  return await chatWithOpenRouter(prompt);
+}
+
+function parseJsonObjectFromAiText(text) {
+  const cleaned = String(text ?? "").replace(/```json|```/gi, "").trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    // Some providers append notes after the JSON. Extract the first balanced object.
+  }
+
+  const start = cleaned.indexOf("{");
+  if (start === -1) {
+    throw new Error("AI response did not contain a JSON object");
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < cleaned.length; index += 1) {
+    const char = cleaned[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+    } else if (char === "{") {
+      depth += 1;
+    } else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return JSON.parse(cleaned.slice(start, index + 1));
+      }
+    }
+  }
+
+  throw new Error("AI response contained incomplete JSON");
+}
+
+async function chatWithOpenRouter(prompt) {
+  if (!openRouterApiKey) return "";
+  if (Date.now() < openRouterUnavailableUntil) return "";
+
+  for (const model of openRouterModels) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), openRouterTimeoutMs);
+
+    try {
+      const response = await fetch(openRouterApiUrl, {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          Authorization: `Bearer ${openRouterApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          temperature: 0,
+          max_tokens: 180,
+          messages: [
+            {
+              role: "user",
+              content: prompt,
+            },
+          ],
+        }),
+      });
+
+      if (!response.ok) {
+        let errorMessage = `OpenRouter HTTP ${response.status}`;
+        try {
+          const errorBody = await response.json();
+          const errorCode = errorBody?.error?.code;
+          const providerMessage = errorBody?.error?.metadata?.raw;
+          errorMessage = [errorCode, errorBody?.error?.message, providerMessage]
+            .filter(Boolean)
+            .join(": ") || errorMessage;
+        } catch {
+          // Keep the HTTP status when OpenRouter returns a non-JSON error page.
+        }
+
+        if (response.status === 429) {
+          const retryAfterSeconds = Number(response.headers.get("retry-after"));
+          const cooldownMs = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
+            ? retryAfterSeconds * 1000
+            : openRouterRateLimitCooldownMs;
+          openRouterUnavailableUntil = Date.now() + cooldownMs;
+        }
+
+        lastOpenRouterError = `${model}: ${errorMessage}`;
+        throw new Error(lastOpenRouterError);
+      }
+
+      const data = await response.json();
+      lastOpenRouterError = "";
+      return data?.choices?.[0]?.message?.content?.trim?.() ?? "";
+    } catch (err) {
+      console.warn("OpenRouter chat failed:", err.message);
+      if (Date.now() < openRouterUnavailableUntil) return "";
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  return "";
+}
+
 const hotels = [
   "Anantara Siam Resort & Spa",
   "The Peninsula Bangkok",
@@ -100,6 +287,95 @@ const hotelCatalog = [
     reasons: ["เหมาะกับการพักผ่อนเงียบ ๆ ใกล้ทะเล", "เน้น wellness", "วิวทะเลสวย"],
   },
 ];
+
+async function extractBookingWithAI(message, currentBooking) {
+  if (activeAiMode === "rule-based") return null;
+
+  const prompt = `วิเคราะห์ข้อความของลูกค้าและดึงข้อมูลการจองโรงแรมออกมา
+
+ข้อมูลการจองปัจจุบัน:
+${JSON.stringify(currentBooking, null, 2)}
+
+โรงแรมที่รับจอง:
+${hotels.join(", ")}
+
+ข้อความลูกค้า: "${message}"
+
+ตอบเป็น JSON เท่านั้น:
+{
+  "hotelName": "ชื่อโรงแรมเต็ม หรือ '' ถ้าไม่พบ",
+  "location": "จังหวัด หรือ '' ถ้าไม่พบ",
+  "checkIn": "YYYY-MM-DD หรือ '' ถ้าไม่พบ",
+  "checkOut": "YYYY-MM-DD หรือ '' ถ้าไม่พบ",
+  "guests": 0,
+  "customerName": "ชื่อลูกค้า หรือ '' ถ้าไม่พบ",
+  "phone": "เบอร์โทร หรือ '' ถ้าไม่พบ"
+}
+
+กฎ:
+- ถ้ามีค่าเดิมอยู่แล้ว ห้ามลบด้วยค่าว่าง
+- hotelName ต้องตรงกับรายการโรงแรมที่มีให้เท่านั้น
+- checkIn และ checkOut ให้เป็น YYYY-MM-DD เสมอ
+- phone ให้เหลือเฉพาะตัวเลข`;
+
+  try {
+    const text = await generateAiText(prompt);
+    if (!text) return null;
+    const parsed = parseJsonObjectFromAiText(text);
+
+    return {
+      hotelName: parsed.hotelName || currentBooking.hotelName || "",
+      location: parsed.location || currentBooking.location || "",
+      checkIn: parsed.checkIn || currentBooking.checkIn || "",
+      checkOut: parsed.checkOut || currentBooking.checkOut || "",
+      guests: parsed.guests || currentBooking.guests || 0,
+      customerName: parsed.customerName || currentBooking.customerName || "",
+      phone: parsed.phone || currentBooking.phone || "",
+      status: currentBooking.status || "collecting",
+    };
+  } catch (err) {
+    console.warn("AI extractBooking failed:", err.message);
+    return null;
+  }
+}
+
+async function askAiAssistant(message, currentBooking) {
+  if (activeAiMode === "rule-based") return "";
+
+  const missing = getMissingField(currentBooking);
+  const missingLabel = {
+    destination: "โรงแรมหรือจังหวัดที่ต้องการพัก",
+    checkIn: "วันเช็กอิน",
+    checkOut: "วันเช็กเอาต์",
+    guests: "จำนวนผู้เข้าพัก",
+    customerName: "ชื่อผู้จอง",
+    phone: "เบอร์โทรศัพท์",
+  };
+
+  const prompt = `คุณคือพนักงานรับจองโรงแรมชื่อ "จ้าว" พูดภาษาไทยสุภาพ ลงท้ายด้วย "ค่ะ"
+
+โรงแรมที่รับจอง: ${hotels.join(", ")}
+
+ข้อมูลการจองที่มี:
+${JSON.stringify(currentBooking, null, 2)}
+
+ข้อมูลที่ยังขาด: ${missing ? missingLabel[missing] : "ครบแล้ว"}
+
+ข้อความลูกค้า: "${message}"
+
+คำสั่ง:
+- ถ้าข้อมูลยังไม่ครบ ให้ถามเฉพาะ "${missing ? missingLabel[missing] : ""}" ทีละอย่าง
+- ถ้าข้อมูลครบแล้ว ให้สรุปและขอยืนยัน
+- ตอบสั้น ไม่เกิน 2 ประโยค
+- ห้ามแต่งข้อมูลเพิ่ม`;
+
+  try {
+    return await generateAiText(prompt);
+  } catch (err) {
+    console.warn("AI askAssistant failed:", err.message);
+    return "";
+  }
+}
 
 const emptyBooking = () => ({
   hotelName: "",
@@ -359,6 +635,28 @@ function recommendHotels(message) {
   return scoredHotels.filter((item) => item.score > 0).slice(0, 3);
 }
 
+function mergeBookingFromAi(aiBooking, fallbackBooking) {
+  if (!aiBooking) {
+    return { booking: fallbackBooking, source: "rule-based" };
+  }
+
+  const booking = {
+    hotelName: aiBooking.hotelName || fallbackBooking.hotelName || "",
+    location: aiBooking.location || fallbackBooking.location || "",
+    checkIn: aiBooking.checkIn || fallbackBooking.checkIn || "",
+    checkOut: aiBooking.checkOut || fallbackBooking.checkOut || "",
+    guests: aiBooking.guests || fallbackBooking.guests || 0,
+    customerName: aiBooking.customerName || fallbackBooking.customerName || "",
+    phone: aiBooking.phone || fallbackBooking.phone || "",
+    status: aiBooking.status || fallbackBooking.status || "collecting",
+  };
+
+  const usedFallback = ["hotelName", "location", "checkIn", "checkOut", "guests", "customerName", "phone"]
+    .some((key) => !aiBooking[key] && Boolean(fallbackBooking[key]));
+
+  return { booking, source: usedFallback ? "ai+rule-based" : "ai" };
+}
+
 function pickBotnoiAudio(payload) {
   if (!payload || typeof payload !== "object") return {};
 
@@ -458,7 +756,16 @@ app.use(express.json({ limit: "1mb" }));
 
 // Health check
 app.get("/api/health", async (req, res) => {
-  res.json({ ok: true });
+  res.json({
+    ok: true,
+    ai: activeAiMode,
+    aiExtractionMode,
+    groqModel: groqApiKey ? groqModel : null,
+    model: openRouterModel,
+    timeoutMs: openRouterTimeoutMs,
+    rateLimitedUntil: openRouterUnavailableUntil ? new Date(openRouterUnavailableUntil).toISOString() : null,
+    lastAiError: lastGroqError || lastOpenRouterError || null,
+  });
 });
 
 // Hotel recommendation
@@ -539,7 +846,14 @@ app.post("/api/ai/booking", async (req, res) => {
     });
   }
 
-  const booking = extractBooking(normalizedMessage, currentBooking);
+  const ruleBasedBooking = extractBooking(normalizedMessage, currentBooking);
+  const shouldTryAiExtraction =
+    activeAiMode !== "rule-based" &&
+    (aiExtractionMode === "always" || getMissingField(ruleBasedBooking) === getMissingField(currentBooking));
+  const aiExtracted = shouldTryAiExtraction
+    ? await extractBookingWithAI(normalizedMessage, currentBooking)
+    : null;
+  const { booking, source: extractionSource } = mergeBookingFromAi(aiExtracted, ruleBasedBooking);
   const missingField = getMissingField(booking);
 
   if (missingField) {
@@ -548,6 +862,8 @@ app.post("/api/ai/booking", async (req, res) => {
       reply: buildQuestion(booking),
       booking: { ...booking, status: "collecting" },
       saved: false,
+      extractionSource,
+      aiTried: shouldTryAiExtraction,
     });
   }
 
@@ -557,6 +873,8 @@ app.post("/api/ai/booking", async (req, res) => {
     reply: buildSummary(awaitingBooking),
     booking: awaitingBooking,
     saved: false,
+    extractionSource,
+    aiTried: shouldTryAiExtraction,
   });
 });
 
@@ -598,7 +916,14 @@ app.post("/api/ai/booking/stream", async (req, res) => {
     return;
   }
 
-  const booking = extractBooking(normalizedMessage, currentBooking);
+  const ruleBasedBooking = extractBooking(normalizedMessage, currentBooking);
+  const shouldTryAiExtraction =
+    activeAiMode !== "rule-based" &&
+    (aiExtractionMode === "always" || getMissingField(ruleBasedBooking) === getMissingField(currentBooking));
+  const aiExtracted = shouldTryAiExtraction
+    ? await extractBookingWithAI(normalizedMessage, currentBooking)
+    : null;
+  const { booking, source: extractionSource } = mergeBookingFromAi(aiExtracted, ruleBasedBooking);
   const missingField = getMissingField(booking);
 
   let replyText;
@@ -617,7 +942,7 @@ app.post("/api/ai/booking/stream", async (req, res) => {
     await new Promise((resolve) => setTimeout(resolve, 30));
   }
   
-  res.write(`data: ${JSON.stringify({ done: true, saved: false, booking: missingField ? { ...booking, status: "collecting" } : sessions.get(sessionId) })}\n\n`);
+  res.write(`data: ${JSON.stringify({ done: true, saved: false, booking: missingField ? { ...booking, status: "collecting" } : sessions.get(sessionId), extractionSource, aiTried: shouldTryAiExtraction })}\n\n`);
   res.end();
 });
 
@@ -625,6 +950,7 @@ app.post("/api/ai/booking/stream", async (req, res) => {
 const PORT = config.port;
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`AI mode: ${activeAiMode === "groq" ? `✅ Groq (${groqModel})` : activeAiMode === "openrouter" ? `✅ OpenRouter (${openRouterModel})` : "⚠️  Rule-based (set GROQ_API_KEY or OPENROUTER_API_KEY to enable AI)"}`);
 });
 
 export default app;

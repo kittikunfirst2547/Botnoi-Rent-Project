@@ -10,33 +10,87 @@ import { config } from "./config.js";
 import health from "./routes/health.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const rootDir = join(__dirname, "..");
 const dataDir = join(__dirname, "data");
 const bookingsFile = join(dataDir, "bookings.json");
 const bookingsSqliteFile = join(dataDir, "bookings.sqlite");
 let bookingsDb;
 const sessions = new Map();
 
-function loadEnvFile() {
-  const envFile = join(__dirname, "../.env");
-  if (!existsSync(envFile)) return;
+// ─── NVIDIA NIM Setup ─────────────────────────────────────────────────────────
+const nvidiaApiKey = process.env.NVIDIA_API_KEY ?? "";
+const nvidiaModel = process.env.NVIDIA_MODEL ?? "openai/gpt-oss-120b";
+const aiMode = nvidiaApiKey ? "nvidia" : "rule-based";
 
-  const lines = readFileSync(envFile, "utf8").split(/\r?\n/);
-  for (const line of lines) {
-    const trimmedLine = line.trim();
-    if (!trimmedLine || trimmedLine.startsWith("#")) continue;
+async function chatWithNvidia(prompt) {
+  if (!nvidiaApiKey) return "";
 
-    const separatorIndex = trimmedLine.indexOf("=");
-    if (separatorIndex === -1) continue;
+  try {
+    const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${nvidiaApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: nvidiaModel,
+        messages: [{ role: "user", content: prompt }],
+        temperature: 0,
+        max_tokens: 120,
+      }),
+    });
 
-    const key = trimmedLine.slice(0, separatorIndex).trim();
-    const value = trimmedLine.slice(separatorIndex + 1).trim().replace(/^["']|["']$/g, "");
-    if (key && process.env[key] === undefined) {
-      process.env[key] = value;
+    if (!response.ok) {
+      console.warn("NVIDIA API error:", response.status);
+      return "";
     }
+
+    const data = await response.json();
+    return data?.choices?.[0]?.message?.content?.trim() ?? "";
+  } catch (err) {
+    console.warn("NVIDIA chat failed:", err.message);
+    return "";
   }
 }
 
+async function generateAiText(prompt) {
+  return await chatWithNvidia(prompt);
+}
+
+function parseJsonObjectFromAiText(text) {
+  const cleaned = String(text ?? "").replace(/```json|```/gi, "").trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    // ignore
+  }
+
+  const start = cleaned.indexOf("{");
+  if (start === -1) throw new Error("AI response did not contain a JSON object");
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < cleaned.length; index += 1) {
+    const char = cleaned[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === "\"") inString = false;
+      continue;
+    }
+    if (char === "\"") inString = true;
+    else if (char === "{") depth += 1;
+    else if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return JSON.parse(cleaned.slice(start, index + 1));
+    }
+  }
+
+  throw new Error("AI response contained incomplete JSON");
+}
+
+// ─── Hotel Data ───────────────────────────────────────────────────────────────
 const hotels = [
   "Anantara Siam Resort & Spa",
   "The Peninsula Bangkok",
@@ -97,6 +151,61 @@ const hotelCatalog = [
   },
 ];
 
+// ─── AI Functions ─────────────────────────────────────────────────────────────
+
+async function extractBookingWithAI(message, currentBooking) {
+  if (aiMode === "rule-based") return null;
+
+  const prompt = `วิเคราะห์ข้อความของลูกค้าและดึงข้อมูลการจองโรงแรมออกมา
+
+ข้อมูลการจองปัจจุบัน (ที่มีอยู่แล้ว):
+${JSON.stringify(currentBooking, null, 2)}
+
+โรงแรมที่รับจอง:
+${hotels.join(", ")}
+
+ข้อความลูกค้า: "${message}"
+
+ตอบเป็น JSON เท่านั้น ไม่ต้องมีคำอธิบาย ไม่ต้องมี markdown:
+{
+  "hotelName": "ชื่อโรงแรมเต็ม หรือ '' ถ้าไม่พบ",
+  "location": "จังหวัด หรือ '' ถ้าไม่พบ",
+  "checkIn": "YYYY-MM-DD หรือ '' ถ้าไม่พบ",
+  "checkOut": "YYYY-MM-DD หรือ '' ถ้าไม่พบ",
+  "guests": จำนวนคน (number) หรือ 0 ถ้าไม่พบ,
+  "customerName": "ชื่อลูกค้า หรือ '' ถ้าไม่พบ",
+  "phone": "เบอร์โทร หรือ '' ถ้าไม่พบ"
+}
+
+กฎ:
+- ถ้าข้อมูลปัจจุบันมีค่าอยู่แล้ว ให้คงค่าเดิมไว้ อย่า overwrite ด้วยค่าว่าง
+- hotelName ต้องตรงกับชื่อโรงแรมในรายการเท่านั้น
+- checkIn และ checkOut ให้แปลงเป็น YYYY-MM-DD เสมอ ปีปัจจุบันคือ ${new Date().getFullYear()}
+- phone ให้เอาแค่ตัวเลข ไม่ต้องมีขีด หรือวรรค`;
+
+  try {
+    const text = await generateAiText(prompt);
+    if (!text) return null;
+    const parsed = parseJsonObjectFromAiText(text);
+
+    return {
+      hotelName: parsed.hotelName || currentBooking.hotelName || "",
+      location: parsed.location || currentBooking.location || "",
+      checkIn: parsed.checkIn || currentBooking.checkIn || "",
+      checkOut: parsed.checkOut || currentBooking.checkOut || "",
+      guests: parsed.guests || currentBooking.guests || 0,
+      customerName: parsed.customerName || currentBooking.customerName || "",
+      phone: parsed.phone || currentBooking.phone || "",
+      status: currentBooking.status || "collecting",
+    };
+  } catch (err) {
+    console.warn("AI extractBooking failed:", err.message);
+    return null;
+  }
+}
+
+// ─── Database ─────────────────────────────────────────────────────────────────
+
 const emptyBooking = () => ({
   hotelName: "",
   location: "",
@@ -110,9 +219,20 @@ const emptyBooking = () => ({
 
 function looksLikePlainCustomerName(text) {
   const value = text.trim();
-  if (value.length < 2 || value.length > 60) return false;
+  if (value.length < 2 || value.length > 40) return false;
   if (/\d/.test(value)) return false;
-  if (/confirm|ok|yes|no/i.test(value)) return false;
+
+  // ❌ ห้ามรับคำที่เป็น greeting หรือคำทั่วไป
+  const blocklist = [
+    "สวัสดี", "หวัดดี", "ดี", "hello", "hi", "hey",
+    "จอง", "ต้องการ", "อยาก", "ขอ", "ช่วย",
+    "confirm", "ok", "yes", "no", "โอเค", "ยืนยัน", "ตกลง",
+    "ครับ", "ค่ะ", "คะ", "นะ", "จ้า", "จ้ะ",
+    "ใช่", "ไม่", "ได้", "ไป", "มา", "แล้ว",
+  ];
+  if (blocklist.some((word) => value.toLowerCase() === word.toLowerCase())) return false;
+
+  // ✅ ต้องมีอักษรไทยหรืออังกฤษเป็นหลัก ไม่มีอักขระแปลกๆ
   return /^[A-Za-zก-๙\s.'-]+$/.test(value);
 }
 
@@ -176,292 +296,7 @@ async function saveBooking(booking) {
   return savedBooking;
 }
 
-function pickBotnoiReply(payload) {
-  if (!payload || typeof payload !== "object") return "";
-
-  const candidates = [
-    payload.reply,
-    payload.message,
-    payload.text,
-    payload.answer,
-    payload.response,
-    payload.result?.reply,
-    payload.result?.message,
-    payload.data?.reply,
-    payload.data?.message,
-  ];
-
-  return candidates.find((value) => typeof value === "string" && value.trim()) ?? "";
-}
-
-async function askBotnoi({ message, sessionId, booking }) {
-  if (!config.botnoi.apiUrl || !config.botnoi.token) {
-    return "";
-  }
-
-  const response = await fetch(config.botnoi.apiUrl, {
-    method: "POST",
-    headers: {
-      "botnoi-token": config.botnoi.token,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      bot_id: config.botnoi.botId,
-      session_id: sessionId,
-      message,
-      context: {
-        feature: "hotel_booking",
-        booking,
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Botnoi API error: ${response.status}`);
-  }
-
-  return pickBotnoiReply(await response.json());
-}
-
-function getBotnoiConfirmTemplateUrl() {
-  if (process.env.BOTNOI_CONFIRM_TEMPLATE_URL) {
-    return process.env.BOTNOI_CONFIRM_TEMPLATE_URL;
-  }
-  if (!config.botnoi.apiBaseUrl) return "";
-  return `${config.botnoi.apiBaseUrl.replace(/\/$/, "")}/confirm/create_template`;
-}
-
-function getBotnoiOutboundCallUrl() {
-  if (process.env.BOTNOI_OUTBOUND_CALL_URL) {
-    return process.env.BOTNOI_OUTBOUND_CALL_URL;
-  }
-  if (!config.botnoi.apiBaseUrl) return "";
-  return `${config.botnoi.apiBaseUrl.replace(/\/$/, "")}/confirm/call`;
-}
-
-async function createBotnoiConfirmTemplate(template) {
-  const url = getBotnoiConfirmTemplateUrl();
-  if (!url || !config.botnoi.token) {
-    return { skipped: true, reason: "BOTNOI_CONFIRM_TEMPLATE_URL or BOTNOI_API_BASE_URL and BOTNOI_TOKEN are required" };
-  }
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "botnoi-token": config.botnoi.token, "Content-Type": "application/json" },
-    body: JSON.stringify(template),
-  });
-
-  const text = await response.text();
-  let payload = text;
-  try { payload = JSON.parse(text); } catch { /* plain text */ }
-
-  if (!response.ok) {
-    throw new Error(`Botnoi template API error: ${response.status} ${typeof payload === "string" ? payload : JSON.stringify(payload)}`);
-  }
-  return payload;
-}
-
-async function sendBotnoiOutboundCall(payload) {
-  const url = getBotnoiOutboundCallUrl();
-  if (!url || !config.botnoi.token) {
-    return { skipped: true, reason: "BOTNOI_OUTBOUND_CALL_URL or BOTNOI_API_BASE_URL and BOTNOI_TOKEN are required" };
-  }
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "botnoi-token": config.botnoi.token, "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-
-  const text = await response.text();
-  let result = text;
-  try { result = JSON.parse(text); } catch { /* plain text */ }
-
-  if (!response.ok) {
-    throw new Error(`Botnoi outbound call API error: ${response.status} ${typeof result === "string" ? result : JSON.stringify(result)}`);
-  }
-  return result;
-}
-
-function pickBotnoiAudio(payload) {
-  if (!payload || typeof payload !== "object") return {};
-
-  const audioUrl =
-    payload.audio_url ?? payload.audioUrl ?? payload.url ?? payload.file_url ?? payload.fileUrl ??
-    payload.result?.audio_url ?? payload.result?.audioUrl ?? payload.result?.url ??
-    payload.data?.audio_url ?? payload.data?.audioUrl ?? payload.data?.url ?? "";
-
-  const audioBase64 =
-    payload.audio_base64 ?? payload.audioBase64 ?? payload.base64 ?? payload.audio ??
-    payload.result?.audio_base64 ?? payload.result?.audioBase64 ?? payload.result?.base64 ?? payload.result?.audio ??
-    payload.data?.audio_base64 ?? payload.data?.audioBase64 ?? payload.data?.base64 ?? payload.data?.audio ?? "";
-
-  const mimeType =
-    payload.mime_type ?? payload.mimeType ??
-    payload.result?.mime_type ?? payload.result?.mimeType ??
-    payload.data?.mime_type ?? payload.data?.mimeType ?? "audio/mpeg";
-
-  return { audioUrl, audioBase64, mimeType };
-}
-
-async function synthesizeBotnoiSpeech(text) {
-  if (!config.botnoi.ttsUrl || !config.botnoi.token) {
-    return { skipped: true, reason: "BOTNOI_TTS_URL and BOTNOI_TOKEN are required" };
-  }
-
-  const response = await fetch(config.botnoi.ttsUrl, {
-    method: "POST",
-    headers: { "botnoi-token": config.botnoi.token, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      text,
-      speaker: config.botnoi.speakerId,
-      volume: 1,
-      speed: 1,
-      type_media: "mp3",
-      save_file: "true",
-      language: "th",
-      page: "user",
-    }),
-  });
-
-  const contentType = response.headers.get("content-type") ?? "";
-  if (contentType.startsWith("audio/")) {
-    const buffer = Buffer.from(await response.arrayBuffer());
-    return { audioBase64: buffer.toString("base64"), mimeType: contentType };
-  }
-
-  const payload = await response.json();
-  if (!response.ok) {
-    throw new Error(`Botnoi TTS error: ${response.status} ${JSON.stringify(payload)}`);
-  }
-
-  const audio = pickBotnoiAudio(payload);
-  if (!audio.audioUrl && !audio.audioBase64) {
-    throw new Error("Botnoi TTS did not return audio");
-  }
-  return audio;
-}
-
-function parseBody(req) {
-  if (req.body && typeof req.body === "object") {
-    return Promise.resolve(req.body);
-  }
-
-  return new Promise((resolve, reject) => {
-    let body = "";
-    req.on("data", (chunk) => {
-      body += chunk;
-      if (body.length > 1_000_000) {
-        req.destroy();
-        reject(new Error("Request body is too large"));
-      }
-    });
-    req.on("end", () => {
-      if (!body) { resolve({}); return; }
-      try { resolve(JSON.parse(body)); }
-      catch { reject(new Error("Invalid JSON body")); }
-    });
-    req.on("error", reject);
-  });
-}
-
-function sendJson(res, statusCode, payload) {
-  res.writeHead(statusCode, { "Content-Type": "application/json; charset=utf-8" });
-  res.end(JSON.stringify(payload));
-}
-
-function normalizeSearchText(text) {
-  return normalizeThaiDigits(String(text ?? "").trim().toLowerCase());
-}
-
-function getRecommendationSignals(text) {
-  const normalized = normalizeSearchText(text);
-  const signals = new Set();
-
-  const groups = [
-    { signal: "phuket", words: ["ภูเก็ต", "phuket"] },
-    { signal: "krabi", words: ["กระบี่", "krabi"] },
-    { signal: "samui", words: ["สมุย", "samui", "เกาะ"] },
-    { signal: "chiang mai", words: ["เชียงใหม่", "chiang mai", "ภูเขา", "ธรรมชาติ", "เงียบ", "พักใจ"] },
-    { signal: "bangkok", words: ["กรุงเทพ", "bangkok", "เมือง", "สุขุมวิท", "เจ้าพระยา"] },
-    { signal: "beach", words: ["ทะเล", "ชายหาด", "beach", "sea", "หาด", "ติดทะเล", "ใกล้ทะเล"] },
-    { signal: "river", words: ["แม่น้ำ", "เจ้าพระยา", "river"] },
-    { signal: "luxury", words: ["หรู", "luxury", "พรีเมียม", "ส่วนตัว"] },
-    { signal: "quiet", words: ["เงียบ", "สงบ", "พักผ่อน", "ชิล", "relax"] },
-    { signal: "wellness", words: ["สปา", "wellness", "สุขภาพ"] },
-    { signal: "romantic", words: ["คู่รัก", "โรแมนติก", "แฟน", "honeymoon"] },
-  ];
-
-  for (const group of groups) {
-    if (group.words.some((word) => normalized.includes(word))) {
-      signals.add(group.signal);
-    }
-  }
-  return [...signals];
-}
-
-function recommendHotels(message) {
-  const signals = getRecommendationSignals(message);
-  const normalized = normalizeSearchText(message);
-  const budgetMatch = normalized.match(/(?:งบ|budget|ไม่เกิน|ต่ำกว่า)\s*(\d{4,6})/);
-  const budget = budgetMatch ? Number(budgetMatch[1]) : 0;
-
-  const scoredHotels = hotelCatalog
-    .map((hotel) => {
-      let score = 0;
-      const matchedSignals = [];
-      for (const signal of signals) {
-        if (hotel.tags.includes(signal) || hotel.province.toLowerCase().includes(signal)) {
-          score += 3;
-          matchedSignals.push(signal);
-        }
-      }
-      if (budget && hotel.price <= budget) score += 2;
-      if (signals.includes("beach") && hotel.tags.includes("sea")) score += 2;
-      if (normalized.includes(hotel.province.toLowerCase())) score += 3;
-      return { hotel, score, matchedSignals };
-    })
-    .sort((a, b) => b.score - a.score || a.hotel.price - b.hotel.price);
-
-  return scoredHotels.filter((item) => item.score > 0).slice(0, 3);
-}
-
-async function handleHotelRecommendation(req, res) {
-  const { message = "" } = await parseBody(req);
-  const normalizedMessage = String(message).trim();
-
-  if (!normalizedMessage) {
-    sendJson(res, 400, { error: "message is required" });
-    return;
-  }
-
-  const recommendations = recommendHotels(normalizedMessage);
-
-  if (!recommendations.length) {
-    sendJson(res, 200, {
-      reply: "อยากพักแนวไหนคะ เช่น ใกล้ทะเล ภูเขา ในเมือง เงียบ ๆ หรู ๆ หรือมีงบประมาณประมาณเท่าไหร่",
-      recommendations: [],
-      needsMoreInfo: true,
-    });
-    return;
-  }
-
-  const top = recommendations[0].hotel;
-  const reply = `จากโจทย์ของคุณ แนะนำ ${top.name} ที่${top.location} เพราะ${top.reasons[0]}ค่ะ`;
-
-  sendJson(res, 200, {
-    reply,
-    recommendations: recommendations.map(({ hotel, score }) => ({
-      name: hotel.name,
-      location: hotel.location,
-      province: hotel.province,
-      price: hotel.price,
-      reasons: hotel.reasons,
-      score,
-    })),
-    needsMoreInfo: false,
-  });
-}
+// ─── Rule-based Fallback ──────────────────────────────────────────────────────
 
 function normalizeThaiDigits(text) {
   const thaiDigits = "๐๑๒๓๔๕๖๗๘๙";
@@ -501,7 +336,7 @@ function parseDate(text, fallbackYear = new Date().getFullYear()) {
   return "";
 }
 
-function extractBooking(message, currentBooking) {
+function extractBookingRuleBased(message, currentBooking) {
   const text = normalizeThaiDigits(message.trim());
   const lowerText = text.toLowerCase();
   const booking = { ...currentBooking };
@@ -539,17 +374,21 @@ function extractBooking(message, currentBooking) {
   const phoneMatch = text.match(/0\d[\d\s-]{7,12}\d/);
   if (phoneMatch) booking.phone = phoneMatch[0].replace(/\D/g, "");
 
-  const nameMatch = text.match(/(?:ชื่อ|ผมชื่อ|ฉันชื่อ|ดิฉันชื่อ)\s*([ก-๙A-Za-z ]{2,40})(?:\s+เบอร์|\s+โทร|\s+พัก|\s*$)/);
-  if (nameMatch) booking.customerName = nameMatch[1].trim();
-
-  if (!booking.customerName && getMissingField(currentBooking) === "customerName") {
-    const cleanedText = text
-      .replace(/^(คุณ|ครับ|ค่ะ|ผม|ดิฉัน|ฉัน)\s+/g, "")
-      .replace(/\s+(ครับ|ค่ะ|คิดฉูด|คิด|ฉูด|เอ่อ|อ่า|หืม|ฮืม)$/g, "")
-      .replace(/\s+(ครับ|ค่ะ|คิดฉูด|คิด|ฉูด|เอ่อ|อ่า)\s+/g, " ")
-      .trim();
-    if (looksLikePlainCustomerName(cleanedText)) {
-      booking.customerName = cleanedText;
+  // Name extraction
+  if (getMissingField(currentBooking) === "customerName") { //ถ้า missingField = customerName ให้ดึงชื่อลูกค้า
+    const nameMatch = text.match(
+      /(?:ชื่อ|ผมชื่อ|ฉันชื่อ|ดิฉันชื่อ|หนูชื่อ|เรียกว่า)\s*([ก-๙A-Za-z][ก-๙A-Za-z\s.'-]{1,39})(?:\s+เบอร์|\s+โทร|\s+พัก|\s*$)/
+    );
+    if (nameMatch) {
+      booking.customerName = nameMatch[1].trim();
+    } else {
+      const cleanedText = text
+        .replace(/^(คุณ|ครับ|ค่ะ|ผม|ดิฉัน|ฉัน|หนู)\s+/g, "")
+        .replace(/\s*(ครับ|ค่ะ|จ้า|จ้ะ|นะคะ|นะครับ|เอ่อ|อ่า|หืม|ฮืม)$/g, "")
+        .trim();
+      if (looksLikePlainCustomerName(cleanedText)) {
+        booking.customerName = cleanedText;
+      }
     }
   }
 
@@ -584,174 +423,312 @@ function buildSummary(booking) {
   return `สรุปการจอง ${destination} เช็คอิน ${booking.checkIn} เช็คเอาท์ ${booking.checkOut} พัก ${booking.guests} ท่าน ชื่อผู้จอง ${booking.customerName} เบอร์ ${booking.phone} ยืนยันการจองไหมคะ`;
 }
 
-async function handleAiBooking(req, res, options = {}) {
-  const { requireBotnoi = false, stream = false } = options;
-  const { message = "", sessionId = "default", hotelName = "" } = await parseBody(req);
-  const currentBooking = { ...(sessions.get(sessionId) ?? emptyBooking()) };
-  if (hotelName && !currentBooking.hotelName) {
-    currentBooking.hotelName = String(hotelName);
-  }
-  const normalizedMessage = String(message).trim();
+function mergeBookingFromAi(aiBooking, fallbackBooking) {
+  if (!aiBooking) return { booking: fallbackBooking, source: "rule-based" };
 
-  if (!normalizedMessage) {
-    sendJson(res, 400, { error: "message is required" });
+  return {
+    booking: {
+      hotelName: aiBooking.hotelName || fallbackBooking.hotelName || "",
+      location: aiBooking.location || fallbackBooking.location || "",
+      checkIn: aiBooking.checkIn || fallbackBooking.checkIn || "",
+      checkOut: aiBooking.checkOut || fallbackBooking.checkOut || "",
+      guests: aiBooking.guests || fallbackBooking.guests || 0,
+      customerName: aiBooking.customerName || fallbackBooking.customerName || "",
+      phone: aiBooking.phone || fallbackBooking.phone || "",
+      status: aiBooking.status || fallbackBooking.status || "collecting",
+    },
+    source: "nvidia",
+  };
+}
+
+// ─── Botnoi TTS ───────────────────────────────────────────────────────────────
+
+function pickBotnoiAudio(payload) {
+  if (!payload || typeof payload !== "object") return {};
+
+  const audioUrl =
+    payload.audio_url ?? payload.audioUrl ?? payload.url ??
+    payload.result?.audio_url ?? payload.result?.audioUrl ??
+    payload.data?.audio_url ?? payload.data?.audioUrl ?? "";
+
+  const audioBase64 =
+    payload.audio_base64 ?? payload.audioBase64 ?? payload.base64 ?? payload.audio ??
+    payload.result?.audio_base64 ?? payload.result?.audioBase64 ?? payload.result?.audio ??
+    payload.data?.audio_base64 ?? payload.data?.audioBase64 ?? payload.data?.audio ?? "";
+
+  const mimeType =
+    payload.mime_type ?? payload.mimeType ??
+    payload.result?.mime_type ?? payload.result?.mimeType ??
+    payload.data?.mime_type ?? payload.data?.mimeType ?? "audio/mpeg";
+
+  return { audioUrl, audioBase64, mimeType };
+}
+
+async function synthesizeBotnoiSpeech(text) {
+  if (!config.botnoi.ttsUrl || !config.botnoi.token) {
+    return { skipped: true, reason: "BOTNOI_TTS_URL and BOTNOI_TOKEN are required" };
+  }
+
+  const response = await fetch(config.botnoi.ttsUrl, {
+    method: "POST",
+    headers: { "botnoi-token": config.botnoi.token, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      text,
+      speaker: config.botnoi.speakerId,
+      volume: 1,
+      speed: 1,
+      type_media: "mp3",
+      save_file: "true",
+      language: "th",
+      page: "user",
+    }),
+  });
+
+  const contentType = response.headers.get("content-type") ?? "";
+  if (contentType.startsWith("audio/")) {
+    const buffer = Buffer.from(await response.arrayBuffer());
+    return { audioBase64: buffer.toString("base64"), mimeType: contentType };
+  }
+
+  const payload = await response.json();
+  if (!response.ok) throw new Error(`Botnoi TTS error: ${response.status} ${JSON.stringify(payload)}`);
+
+  const audio = pickBotnoiAudio(payload);
+  if (!audio.audioUrl && !audio.audioBase64) throw new Error("Botnoi TTS did not return audio");
+  return audio;
+}
+
+// ─── Hotel Recommendation ─────────────────────────────────────────────────────
+
+function normalizeSearchText(text) {
+  return normalizeThaiDigits(String(text ?? "").trim().toLowerCase());
+}
+
+function getRecommendationSignals(text) {
+  const normalized = normalizeSearchText(text);
+  const signals = new Set();
+
+  const groups = [
+    { signal: "phuket", words: ["ภูเก็ต", "phuket"] },
+    { signal: "krabi", words: ["กระบี่", "krabi"] },
+    { signal: "samui", words: ["สมุย", "samui", "เกาะ"] },
+    { signal: "chiang mai", words: ["เชียงใหม่", "chiang mai", "ภูเขา", "ธรรมชาติ", "เงียบ", "พักใจ"] },
+    { signal: "bangkok", words: ["กรุงเทพ", "bangkok", "เมือง", "สุขุมวิท", "เจ้าพระยา"] },
+    { signal: "beach", words: ["ทะเล", "ชายหาด", "beach", "sea", "หาด", "ติดทะเล", "ใกล้ทะเล"] },
+    { signal: "river", words: ["แม่น้ำ", "เจ้าพระยา", "river"] },
+    { signal: "luxury", words: ["หรู", "luxury", "พรีเมียม", "ส่วนตัว"] },
+    { signal: "quiet", words: ["เงียบ", "สงบ", "พักผ่อน", "ชิล", "relax"] },
+    { signal: "wellness", words: ["สปา", "wellness", "สุขภาพ"] },
+    { signal: "romantic", words: ["คู่รัก", "โรแมนติก", "แฟน", "honeymoon"] },
+  ];
+
+  for (const group of groups) {
+    if (group.words.some((word) => normalized.includes(word))) signals.add(group.signal);
+  }
+  return [...signals];
+}
+
+function recommendHotels(message) {
+  const signals = getRecommendationSignals(message);
+  const normalized = normalizeSearchText(message);
+  const budgetMatch = normalized.match(/(?:งบ|budget|ไม่เกิน|ต่ำกว่า)\s*(\d{4,6})/);
+  const budget = budgetMatch ? Number(budgetMatch[1]) : 0;
+
+  const scoredHotels = hotelCatalog
+    .map((hotel) => {
+      let score = 0;
+      for (const signal of signals) {
+        if (hotel.tags.includes(signal) || hotel.province.toLowerCase().includes(signal)) score += 3;
+      }
+      if (budget && hotel.price <= budget) score += 2;
+      if (signals.includes("beach") && hotel.tags.includes("sea")) score += 2;
+      if (normalized.includes(hotel.province.toLowerCase())) score += 3;
+      return { hotel, score };
+    })
+    .sort((a, b) => b.score - a.score || a.hotel.price - b.hotel.price);
+
+  return scoredHotels.filter((item) => item.score > 0).slice(0, 3);
+}
+
+// ─── Request Helpers ──────────────────────────────────────────────────────────
+
+function parseBody(req) {
+  if (req.body && typeof req.body === "object") return Promise.resolve(req.body);
+
+  return new Promise((resolve, reject) => {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 1_000_000) { req.destroy(); reject(new Error("Request body is too large")); }
+    });
+    req.on("end", () => {
+      if (!body) { resolve({}); return; }
+      try { resolve(JSON.parse(body)); }
+      catch { reject(new Error("Invalid JSON body")); }
+    });
+    req.on("error", reject);
+  });
+}
+
+function sendJson(res, statusCode, payload) {
+  res.writeHead(statusCode, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify(payload));
+}
+
+// ─── Route Handlers ───────────────────────────────────────────────────────────
+
+async function handleHotelRecommendation(req, res) {
+  const { message = "" } = await parseBody(req);
+  const normalizedMessage = String(message).trim();
+  if (!normalizedMessage) { sendJson(res, 400, { error: "message is required" }); return; }
+
+  const recommendations = recommendHotels(normalizedMessage);
+  if (!recommendations.length) {
+    sendJson(res, 200, {
+      reply: "อยากพักแนวไหนคะ เช่น ใกล้ทะเล ภูเขา ในเมือง เงียบ ๆ หรู ๆ หรือมีงบประมาณประมาณเท่าไหร่",
+      recommendations: [],
+      needsMoreInfo: true,
+    });
     return;
   }
 
+  const top = recommendations[0].hotel;
+  sendJson(res, 200, {
+    reply: `จากโจทย์ของคุณ แนะนำ ${top.name} ที่${top.location} เพราะ${top.reasons[0]}ค่ะ`,
+    recommendations: recommendations.map(({ hotel, score }) => ({
+      name: hotel.name,
+      location: hotel.location,
+      province: hotel.province,
+      price: hotel.price,
+      reasons: hotel.reasons,
+      score,
+    })),
+    needsMoreInfo: false,
+  });
+}
+
+async function handleAiBooking(req, res, options = {}) {
+  const { stream = false } = options;
+  const { message = "", sessionId = "default", hotelName = "" } = await parseBody(req);
+  const currentBooking = { ...(sessions.get(sessionId) ?? emptyBooking()) };
+
+  if (hotelName && !currentBooking.hotelName) currentBooking.hotelName = String(hotelName);
+
+  const normalizedMessage = String(message).trim();
+  if (!normalizedMessage) { sendJson(res, 400, { error: "message is required" }); return; }
+
+  // ─── ยืนยันการจอง ───────────────────────────────────────────────────────────
   if (currentBooking.status === "awaiting_confirmation" && /^(ยืนยัน|ตกลง|confirm|ok|โอเค)/i.test(normalizedMessage)) {
     const savedBooking = await saveBooking(currentBooking);
     sessions.set(sessionId, emptyBooking());
+    const reply = `จองเรียบร้อยค่ะ หมายเลขการจอง ${savedBooking.id}`;
 
     if (stream) {
-      res.writeHead(200, {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
-      });
-      const reply = `จองเรียบร้อยค่ะ หมายเลขการจอง ${savedBooking.id}`;
+      res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" });
       for (const chunk of reply.split("")) {
         res.write(`data: ${JSON.stringify({ text: chunk })}\n\n`);
-        await new Promise((resolve) => setTimeout(resolve, 30));
+        await new Promise((r) => setTimeout(r, 30));
       }
       res.write(`data: ${JSON.stringify({ done: true, saved: true, booking: savedBooking })}\n\n`);
       res.end();
       return;
     }
 
-    sendJson(res, 200, {
-      reply: `จองเรียบร้อยค่ะ หมายเลขการจอง ${savedBooking.id}`,
-      booking: savedBooking,
-      saved: true,
-    });
+    sendJson(res, 200, { reply, booking: savedBooking, saved: true });
     return;
   }
 
-  const booking = extractBooking(normalizedMessage, currentBooking);
+  // ─── ดึงข้อมูล: NVIDIA AI ก่อน ถ้าไม่ได้ใช้ rule-based ─────────────────────
+  const ruleBasedBooking = extractBookingRuleBased(normalizedMessage, currentBooking);
+  const aiExtracted = aiMode !== "rule-based"
+    ? await extractBookingWithAI(normalizedMessage, currentBooking)
+    : null;
+  const { booking, source: extractionSource } = mergeBookingFromAi(aiExtracted, ruleBasedBooking);
   const missingField = getMissingField(booking);
-  let botnoiReply = "";
 
-  try {
-    botnoiReply = await askBotnoi({ message: normalizedMessage, sessionId, booking });
-  } catch (error) {
-    if (requireBotnoi) throw error;
-    console.warn(error instanceof Error ? error.message : error);
-  }
+  // ─── สร้างคำตอบ ─────────────────────────────────────────────────────────────
+ // ─── สร้างคำตอบ ─────────────────────────────────────────────────────────────
+if (missingField) {
+  sessions.set(sessionId, { ...booking, status: "collecting" });
 
-  if (requireBotnoi && !botnoiReply) {
-    sendJson(res, 502, {
-      error: "Botnoi conversation API is not configured or did not return a reply",
-      setup: { requiredEnv: ["BOTNOI_TOKEN", "BOTNOI_API_URL"] },
-    });
-    return;
-  }
+  // ให้ NVIDIA ตอบแทน buildQuestion
+  const aiReply = await generateAiText(`คุณคือพนักงานจองโรงแรม ตอบภาษาไทย สั้นมาก ลงท้าย "ค่ะ"
 
-  let replyText;
-  if (missingField) {
-    sessions.set(sessionId, { ...booking, status: "collecting" });
-    replyText = botnoiReply || buildQuestion(booking);
+ข้อมูลที่มีแล้ว: ${JSON.stringify(booking)}
+ลูกค้าพูดว่า: "${normalizedMessage}"
+ข้อมูลที่ยังขาด: ${missingField}
+
+กฎเข้ม:
+- ถามเฉพาะ "${missingField}" เท่านั้น ห้ามถามอื่น
+- ถ้าลูกค้าบอกข้อมูลมาแล้ว ให้รับทราบสั้นๆ แล้วถามข้อถัดไป
+- ห้ามพูดซ้ำข้อมูลที่ลูกค้าบอกมาแล้ว
+- ตอบ 1 ประโยคเท่านั้น`);
+
+  const replyText = aiReply || buildQuestion(booking); // fallback ถ้า AI ไม่ตอบ
 
     if (stream) {
-      res.writeHead(200, {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
-      });
+      res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" });
       for (const chunk of replyText.split("")) {
         res.write(`data: ${JSON.stringify({ text: chunk })}\n\n`);
-        await new Promise((resolve) => setTimeout(resolve, 30));
+        await new Promise((r) => setTimeout(r, 30));
       }
-      res.write(`data: ${JSON.stringify({ done: true, saved: false, booking: { ...booking, status: "collecting" } })}\n\n`);
+      res.write(`data: ${JSON.stringify({ done: true, saved: false, booking: { ...booking, status: "collecting" }, extractionSource })}\n\n`);
       res.end();
       return;
     }
 
-    sendJson(res, 200, { reply: replyText, booking: { ...booking, status: "collecting" }, saved: false });
+    sendJson(res, 200, { reply: replyText, booking: { ...booking, status: "collecting" }, saved: false, extractionSource });
     return;
   }
 
+  // ─── ข้อมูลครบ รอยืนยัน ────────────────────────────────────────────────────
   const awaitingBooking = { ...booking, status: "awaiting_confirmation" };
-  sessions.set(sessionId, awaitingBooking);
-  replyText = botnoiReply || buildSummary(awaitingBooking);
+sessions.set(sessionId, awaitingBooking);
+
+// ให้ NVIDIA สรุปแทน buildSummary
+const aiSummary = await generateAiText(`คุณคือพนักงานจองโรงแรม ตอบภาษาไทย ลงท้าย "ค่ะ"
+
+สรุปการจองนี้ให้กระชับ แล้วถามยืนยัน:
+- โรงแรม: ${booking.hotelName}
+- เช็คอิน: ${booking.checkIn}
+- เช็คเอาท์: ${booking.checkOut}
+- จำนวน: ${booking.guests} ท่าน
+- ชื่อ: ${booking.customerName}
+- เบอร์: ${booking.phone}
+
+กฎ: สรุป 1-2 บรรทัด แล้วถามยืนยัน 1 ประโยค รวมไม่เกิน 3 ประโยค`);
+
+const replyText = aiSummary || buildSummary(awaitingBooking); // fallback ถ้า AI ไม่ตอบ
 
   if (stream) {
-    res.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      "Connection": "keep-alive",
-    });
+    res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" });
     for (const chunk of replyText.split("")) {
       res.write(`data: ${JSON.stringify({ text: chunk })}\n\n`);
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      await new Promise((r) => setTimeout(r, 30));
     }
-    res.write(`data: ${JSON.stringify({ done: true, saved: false, booking: awaitingBooking })}\n\n`);
+    res.write(`data: ${JSON.stringify({ done: true, saved: false, booking: awaitingBooking, extractionSource })}\n\n`);
     res.end();
     return;
   }
 
-  sendJson(res, 200, { reply: replyText, booking: awaitingBooking, saved: false });
+  sendJson(res, 200, { reply: replyText, booking: awaitingBooking, saved: false, extractionSource });
 }
 
 async function handleAiBookingStream(req, res) {
   await handleAiBooking(req, res, { stream: true });
 }
 
-async function handleBotnoiBooking(req, res) {
-  await handleAiBooking(req, res, { requireBotnoi: true });
-}
-
-async function handleCreateBotnoiTemplate(req, res) {
-  const body = await parseBody(req);
-  const template = {
-    message: body.message ?? "สวัสดีค่ะ จาก {Org_name} คุณมีนัดในวันที่ {Appointment Date} เวลา {Appointment Time} ต้องการยืนยันนัดหมายมั้ยคะ",
-    confirm_message: body.confirm_message ?? "ขอบคุณค่ะ คุณได้ยืนยันนัดหมายเรียบร้อยแล้ว เราจะรอคุณในวันที่ {Appointment Date} เวลา {Appointment Time} ค่ะ",
-    decline_message: body.decline_message ?? "ขอบคุณค่ะ ยกเลิกนัดหมายเรียบร้อยแล้วนะคะ หากคุณต้องการเปลี่ยนแปลงนัดหมาย สามารถติดต่อกลับหาเราได้เลยนะคะ ขอบคุณค่ะ",
-    fallback_message: body.fallback_message ?? "ขอบคุณค่ะ หากคุณต้องการเปลี่ยนแปลงนัดหมาย สามารถแจ้งเราได้เลยนะคะ",
-    org_name: body.org_name ?? "Javis AI Hotel Booking",
-    speaker_id: body.speaker_id ?? "523",
-  };
-  const result = await createBotnoiConfirmTemplate(template);
-  sendJson(res, 200, { ok: true, result });
-}
-
-async function handleBotnoiOutboundCall(req, res) {
-  const body = await parseBody(req);
-  const phone = body["Tel. Number"] ?? body.phone ?? body.tel ?? body.telNumber;
-  const appointmentDate = body["Appointment Date"] ?? body.appointmentDate;
-  const appointmentTime = body["Appointment Time"] ?? body.appointmentTime;
-  const templateId = body.template_id ?? body.templateId ?? process.env.BOTNOI_TEMPLATE_ID;
-
-  if (!phone || !appointmentDate || !appointmentTime || !templateId) {
-    sendJson(res, 400, {
-      error: "phone, appointmentDate, appointmentTime, and templateId are required",
-      example: { phone: "0999999999", appointmentDate: "31/07/2025", appointmentTime: "00:00", templateId: "7735331941" },
-    });
-    return;
-  }
-
-  const result = await sendBotnoiOutboundCall({
-    "Tel. Number": String(phone),
-    "Appointment Date": String(appointmentDate),
-    "Appointment Time": String(appointmentTime),
-    template_id: String(templateId),
-  });
-  sendJson(res, 200, { ok: true, result });
-}
-
 async function handleBotnoiTts(req, res) {
   const { text = "" } = await parseBody(req);
   const normalizedText = String(text).trim();
-
-  if (!normalizedText) {
-    sendJson(res, 400, { error: "text is required" });
-    return;
-  }
-
+  if (!normalizedText) { sendJson(res, 400, { error: "text is required" }); return; }
   const result = await synthesizeBotnoiSpeech(normalizedText);
   sendJson(res, 200, { ok: true, result });
 }
 
+// ─── Request Router ───────────────────────────────────────────────────────────
+
 async function requestHandler(req, res) {
-  // ✅ Handle preflight
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
       "Access-Control-Allow-Origin": "*",
@@ -766,36 +743,20 @@ async function requestHandler(req, res) {
     const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
 
     if (req.method === "GET" && url.pathname === "/api/health") {
-      sendJson(res, 200, { ok: true });
+      sendJson(res, 200, { ok: true, ai: aiMode, model: nvidiaModel });
       return;
     }
     if (req.method === "POST" && url.pathname === "/api/ai/booking") {
-      await handleAiBooking(req, res);
-      return;
+      await handleAiBooking(req, res); return;
     }
     if (req.method === "POST" && url.pathname === "/api/ai/booking/stream") {
-      await handleAiBookingStream(req, res);
-      return;
+      await handleAiBookingStream(req, res); return;
     }
     if (req.method === "POST" && url.pathname === "/api/ai/hotel-recommendation") {
-      await handleHotelRecommendation(req, res);
-      return;
-    }
-    if (req.method === "POST" && url.pathname === "/api/botnoi/booking-conversation") {
-      await handleBotnoiBooking(req, res);
-      return;
-    }
-    if (req.method === "POST" && url.pathname === "/api/botnoi/create-template") {
-      await handleCreateBotnoiTemplate(req, res);
-      return;
-    }
-    if (req.method === "POST" && url.pathname === "/api/botnoi/outbound-call") {
-      await handleBotnoiOutboundCall(req, res);
-      return;
+      await handleHotelRecommendation(req, res); return;
     }
     if (req.method === "POST" && url.pathname === "/api/botnoi/tts") {
-      await handleBotnoiTts(req, res);
-      return;
+      await handleBotnoiTts(req, res); return;
     }
 
     sendJson(res, 404, { error: "Not found" });
@@ -804,13 +765,12 @@ async function requestHandler(req, res) {
   }
 }
 
-// ─── Bootstrap ───────────────────────────────────────────────────────────────
+// ─── Bootstrap ────────────────────────────────────────────────────────────────
 
 await ensureDatabase();
 
 const app = express();
 
-// ✅ CORS — ต้องอยู่บนสุด ก่อนทุก middleware และ route
 app.use(cors({
   origin: [
     "http://localhost:3000",
@@ -822,13 +782,11 @@ app.use(cors({
   credentials: true,
 }));
 
-// ✅ รับ preflight ทุก route
 app.options("*", cors());
-
 app.use(express.json({ limit: "1mb" }));
-app.use("/api/health", health);
 app.use(requestHandler);
 
 app.listen(config.port, () => {
   console.log(`Server running on http://localhost:${config.port}`);
+  console.log(`AI mode: ${aiMode === "nvidia" ? `✅ NVIDIA NIM (${nvidiaModel})` : "⚠️  Rule-based (set NVIDIA_API_KEY to enable AI)"}`);
 });
