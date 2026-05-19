@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Star, MapPin, Wifi, Coffee, Waves, ArrowUpRight } from "lucide-react";
+import { Star, MapPin, Wifi, Coffee, Waves, ArrowUpRight, ArrowRight } from "lucide-react";
 
 interface HotelCardProps {
   id: string;
@@ -108,9 +108,13 @@ export function HotelCard({
               e.preventDefault();
               onBook(id);
             }}
-            className="rounded-lg bg-[var(--accent-brand)] px-5 py-2.5 text-sm font-medium text-white transition-all duration-200 hover:bg-[var(--accent-brand-hover)] active:scale-[0.97]"
+            className="group relative overflow-hidden rounded-xl bg-gradient-to-r from-[var(--accent-brand)] to-[var(--accent-brand-hover)] px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-[var(--accent-brand)]/25 transition-all duration-300 hover:shadow-xl hover:shadow-[var(--accent-brand)]/40 hover:scale-105 active:scale-95"
           >
-            จองเลย
+            <span className="relative z-10 flex items-center gap-2">
+              จองเลย
+              <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
+            </span>
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent translate-x-[-100%] transition-transform duration-700 group-hover:translate-x-[100%]" />
           </button>
         </div>
       </div>

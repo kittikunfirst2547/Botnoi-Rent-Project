@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { randomInt } from "node:crypto";
 import cors from "cors";
 import express from "express";
 
@@ -415,11 +415,22 @@ async function ensureDatabase() {
   }
 }
 
+function generateBookingId(bookings) {
+  const existingIds = new Set(bookings.map((booking) => String(booking.id)));
+
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const id = String(randomInt(10000, 100000));
+    if (!existingIds.has(id)) return id;
+  }
+
+  throw new Error("Unable to generate a unique booking id");
+}
+
 async function saveBooking(booking) {
   await ensureDatabase();
   const bookings = JSON.parse(await readFile(bookingsFile, "utf8"));
   const savedBooking = {
-    id: randomUUID(),
+    id: generateBookingId(bookings),
     ...booking,
     status: "confirmed",
     createdAt: new Date().toISOString(),

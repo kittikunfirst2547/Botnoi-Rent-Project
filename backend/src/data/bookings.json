@@ -94,5 +94,17 @@
     "phone": "0934715678",
     "status": "confirmed",
     "createdAt": "2026-05-07T09:30:40.080Z"
+  },
+  {
+    "id": "55fc47d2-1d17-4d0c-9ac3-e6597af2da11",
+    "hotelName": "Anantara Siam Resort & Spa",
+    "location": "",
+    "checkIn": "2026-02-14",
+    "checkOut": "2026-01-15",
+    "guests": 8,
+    "customerName": "ณเดช",
+    "phone": "0862345232",
+    "status": "confirmed",
+    "createdAt": "2026-05-14T09:30:23.922Z"
   }
 ]

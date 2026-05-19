@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomInt } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -19,7 +19,7 @@ const sessions = new Map();
 // ─── NVIDIA NIM Setup ─────────────────────────────────────────────────────────
 const nvidiaApiKey = process.env.NVIDIA_API_KEY ?? "";
 const nvidiaModel = process.env.NVIDIA_MODEL ?? "openai/gpt-oss-120b";
-const aiMode = nvidiaApiKey ? "nvidia" : "rule-based";
+const aiMode = nvidiaApiKey && process.env.AI_EXTRACTION_MODE !== "rule-based" ? "nvidia" : "rule-based";
 
 async function chatWithNvidia(prompt) {
   if (!nvidiaApiKey) return "";
@@ -263,11 +263,22 @@ async function ensureDatabase() {
   }
 }
 
+function generateBookingId(bookings) {
+  const existingIds = new Set(bookings.map((booking) => String(booking.id)));
+
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const id = String(randomInt(10000, 100000));
+    if (!existingIds.has(id)) return id;
+  }
+
+  throw new Error("Unable to generate a unique booking id");
+}
+
 async function saveBooking(booking) {
   await ensureDatabase();
   const bookings = JSON.parse(await readFile(bookingsFile, "utf8"));
   const savedBooking = {
-    id: randomUUID(),
+    id: generateBookingId(bookings),
     ...booking,
     status: "confirmed",
     createdAt: new Date().toISOString(),
@@ -350,10 +361,19 @@ function extractBookingRuleBased(message, currentBooking) {
   if (lowerText.includes("กระบี่") || lowerText.includes("krabi")) booking.location = "กระบี่";
   if (lowerText.includes("สมุย") || lowerText.includes("samui")) booking.location = "สมุย";
 
+  const isoDates = [...text.matchAll(/20\d{2}[-/]\d{1,2}[-/]\d{1,2}/g)].map((match) => parseDate(match[0]));
+  if (isoDates.length >= 2) {
+    booking.checkIn = isoDates[0];
+    booking.checkOut = isoDates[1];
+  } else if (isoDates.length === 1) {
+    if (!booking.checkIn) booking.checkIn = isoDates[0];
+    else if (!booking.checkOut) booking.checkOut = isoDates[0];
+  }
+
   const dateRangeMatch =
     text.match(/(?:วันที่|วัน)?\s*(\d{1,2}\s*[^\d\s]+)\s*(?:ถึง|จนถึง|to|-)\s*(\d{1,2}\s*[^\d\s]+)/i) ??
     text.match(/(?:วันที่|วัน)?\s*(\d{1,2})\s*([^\d\s]+)\s*(?:ถึง|จนถึง|to|-)\s*(\d{1,2})\s*(?:\2)?/i);
-  if (dateRangeMatch) {
+  if (isoDates.length < 2 && dateRangeMatch) {
     if (dateRangeMatch.length >= 4) {
       booking.checkIn = parseDate(`${dateRangeMatch[1]} ${dateRangeMatch[2]}`);
       booking.checkOut = parseDate(`${dateRangeMatch[3]} ${dateRangeMatch[2]}`);
@@ -374,8 +394,13 @@ function extractBookingRuleBased(message, currentBooking) {
   const phoneMatch = text.match(/0\d[\d\s-]{7,12}\d/);
   if (phoneMatch) booking.phone = phoneMatch[0].replace(/\D/g, "");
 
+  const explicitNameMatch = text.match(
+    /(?:ชื่อ|ผมชื่อ|ฉันชื่อ|ดิฉันชื่อ|หนูชื่อ|ผู้จองชื่อ|จองในชื่อ|เรียกว่า)\s*([ก-๙A-Za-z][ก-๙A-Za-z\s.'-]{1,39})(?:\s+เบอร์|\s+โทร|\s+พัก|\s+เช็ค|\s+วันที่|\s*$)/
+  );
+  if (explicitNameMatch) booking.customerName = explicitNameMatch[1].trim();
+
   // Name extraction
-  if (getMissingField(currentBooking) === "customerName") { //ถ้า missingField = customerName ให้ดึงชื่อลูกค้า
+  if (!booking.customerName && getMissingField(currentBooking) === "customerName") { //ถ้า missingField = customerName ให้ดึงชื่อลูกค้า
     const nameMatch = text.match(
       /(?:ชื่อ|ผมชื่อ|ฉันชื่อ|ดิฉันชื่อ|หนูชื่อ|เรียกว่า)\s*([ก-๙A-Za-z][ก-๙A-Za-z\s.'-]{1,39})(?:\s+เบอร์|\s+โทร|\s+พัก|\s*$)/
     );
@@ -440,6 +465,248 @@ function mergeBookingFromAi(aiBooking, fallbackBooking) {
     source: "nvidia",
   };
 }
+
+const bookingIntents = new Set([
+  "provide_info",
+  "correction",
+  "confirm",
+  "cancel",
+  "restart",
+  "price_question",
+  "hotel_question",
+  "off_topic",
+  "unknown",
+]);
+
+function sanitizeIntent(intent) {
+  return bookingIntents.has(intent) ? intent : "unknown";
+}
+
+function normalizePhone(phone) {
+  return String(phone ?? "").replace(/\D/g, "");
+}
+
+function isValidPhone(phone) {
+  const normalized = normalizePhone(phone);
+  return /^0\d{8,9}$/.test(normalized);
+}
+
+function isValidIsoDate(date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date ?? ""))) return false;
+  const parsed = new Date(`${date}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date;
+}
+
+function isCheckOutAfterCheckIn(checkIn, checkOut) {
+  if (!checkIn || !checkOut || !isValidIsoDate(checkIn) || !isValidIsoDate(checkOut)) return true;
+  return new Date(checkOut) > new Date(checkIn);
+}
+
+function getHotelMeta(name) {
+  return hotelCatalog.find((hotel) => hotel.name.toLowerCase() === String(name ?? "").toLowerCase()) ?? null;
+}
+
+function hasAnyBookingInfo(booking) {
+  return Boolean(
+    booking.hotelName ||
+    booking.location ||
+    booking.checkIn ||
+    booking.checkOut ||
+    booking.guests ||
+    booking.customerName ||
+    booking.phone
+  );
+}
+
+function detectIntentRuleBased(message) {
+  const normalized = normalizeThaiDigits(String(message ?? "").trim().toLowerCase());
+  if (/^(ยืนยัน|ตกลง|confirm|ok|โอเค|ใช่|ถูกต้อง|ได้เลย)/i.test(normalized)) return "confirm";
+  if (/(ยกเลิก|cancel|ไม่จอง|พอก่อน)/i.test(normalized)) return "cancel";
+  if (/(เริ่มใหม่|ล้างข้อมูล|reset|เริ่มจองใหม่)/i.test(normalized)) return "restart";
+  if (/(เปลี่ยน|แก้|ไม่ใช่|เอาเป็น|ขอเป็น|แก้ไข)/i.test(normalized)) return "correction";
+  if (/(ราคา|กี่บาท|เท่าไหร่|เท่าไร|price|แพง|ถูก)/i.test(normalized)) return "price_question";
+  if (/(โรงแรม|ที่พัก|อยู่ที่ไหน|มีอะไร|แนะนำ)/i.test(normalized)) return "hotel_question";
+  return "provide_info";
+}
+
+function cleanBookingPatch(patch = {}) {
+  const cleaned = {};
+  if (patch.hotelName && hotels.includes(patch.hotelName)) cleaned.hotelName = patch.hotelName;
+  if (patch.location) cleaned.location = String(patch.location).trim();
+  if (patch.checkIn && isValidIsoDate(patch.checkIn)) cleaned.checkIn = patch.checkIn;
+  if (patch.checkOut && isValidIsoDate(patch.checkOut)) cleaned.checkOut = patch.checkOut;
+  if (Number.isInteger(Number(patch.guests)) && Number(patch.guests) > 0 && Number(patch.guests) <= 20) {
+    cleaned.guests = Number(patch.guests);
+  }
+  if (patch.customerName && looksLikePlainCustomerName(String(patch.customerName))) {
+    cleaned.customerName = String(patch.customerName).trim();
+  }
+  const phone = normalizePhone(patch.phone);
+  if (isValidPhone(phone)) cleaned.phone = phone;
+  return cleaned;
+}
+
+function applyBookingPatch(currentBooking, patch, { allowOverwrite = true } = {}) {
+  const cleaned = cleanBookingPatch(patch);
+  const nextBooking = { ...currentBooking };
+  const corrections = [];
+
+  for (const [field, value] of Object.entries(cleaned)) {
+    if (!allowOverwrite && nextBooking[field]) continue;
+    if (nextBooking[field] !== value) corrections.push({ field, from: nextBooking[field] || "", to: value });
+    nextBooking[field] = value;
+  }
+
+  if (nextBooking.checkIn && nextBooking.checkOut && !isCheckOutAfterCheckIn(nextBooking.checkIn, nextBooking.checkOut)) {
+    if (cleaned.checkOut) nextBooking.checkOut = "";
+    else nextBooking.checkIn = "";
+  }
+
+  return { booking: nextBooking, corrections };
+}
+
+function buildRuleBasedIntent(message, currentBooking) {
+  const intent = detectIntentRuleBased(message);
+  const parsedBooking = extractBookingRuleBased(message, currentBooking);
+  const { booking, corrections } = applyBookingPatch(currentBooking, parsedBooking);
+  return {
+    intent,
+    booking,
+    corrections,
+    confidence: hasAnyBookingInfo(parsedBooking) || intent !== "provide_info" ? 0.72 : 0.45,
+    source: "rule-based",
+  };
+}
+
+async function extractBookingIntent(message, currentBooking) {
+  const fallback = buildRuleBasedIntent(message, currentBooking);
+  if (aiMode === "rule-based") return fallback;
+
+  const prompt = `You are a strict booking intent extractor for a Thai hotel booking assistant.
+Return one JSON object only. Do not include markdown.
+
+Current booking:
+${JSON.stringify(currentBooking, null, 2)}
+
+Available hotels:
+${hotels.join(", ")}
+
+Customer message:
+"${message}"
+
+JSON shape:
+{
+  "intent": "provide_info | correction | confirm | cancel | restart | price_question | hotel_question | off_topic | unknown",
+  "booking": {
+    "hotelName": "exact hotel name from list or empty string",
+    "location": "province/location or empty string",
+    "checkIn": "YYYY-MM-DD or empty string",
+    "checkOut": "YYYY-MM-DD or empty string",
+    "guests": 0,
+    "customerName": "name or empty string",
+    "phone": "digits only or empty string"
+  },
+  "corrections": [{"field":"fieldName","value":"new value"}],
+  "confidence": 0.0
+}
+
+Rules:
+- Keep empty string or 0 when the message does not clearly provide a value.
+- Use current year ${new Date().getFullYear()} for dates without a year.
+- If the customer changes old data, use intent "correction" and include the new value in booking.
+- If the customer says confirm/ok/ถูกต้อง, use intent "confirm".
+- If the customer asks price, use "price_question".
+- If the customer goes off topic, use "off_topic".
+- Do not invent hotel names, dates, phone numbers, or customer names.`;
+
+  try {
+    const text = await generateAiText(prompt);
+    if (!text) return fallback;
+    const parsed = parseJsonObjectFromAiText(text);
+    const intent = sanitizeIntent(parsed.intent);
+    const aiPatch = cleanBookingPatch(parsed.booking ?? {});
+    const { booking, corrections } = applyBookingPatch(fallback.booking, aiPatch);
+    return {
+      intent: intent === "unknown" ? fallback.intent : intent,
+      booking,
+      corrections: corrections.length ? corrections : fallback.corrections,
+      confidence: Math.max(0, Math.min(1, Number(parsed.confidence ?? fallback.confidence))),
+      source: "nvidia",
+    };
+  } catch (err) {
+    console.warn("AI extractBookingIntent failed:", err.message);
+    return fallback;
+  }
+}
+
+function fieldLabel(field) {
+  return {
+    destination: "ปลายทางหรือโรงแรม",
+    checkIn: "วันเช็คอิน",
+    checkOut: "วันเช็คเอาท์",
+    guests: "จำนวนผู้เข้าพัก",
+    customerName: "ชื่อผู้จอง",
+    phone: "เบอร์โทร",
+  }[field] ?? field;
+}
+
+function buildDeterministicBookingReply({ intent, booking, missingField, savedBooking }) {
+  if (intent === "cancel") return "ยกเลิกการจองรอบนี้ให้แล้วค่ะ หากต้องการเริ่มใหม่บอกชื่อโรงแรมหรือจังหวัดได้เลยค่ะ";
+  if (intent === "restart") return booking.hotelName ? `เริ่มใหม่ให้แล้วค่ะ ${buildQuestion(booking)}` : "เริ่มใหม่ให้แล้วค่ะ ต้องการจองโรงแรมที่ไหนคะ";
+  if (intent === "price_question") {
+    const hotel = getHotelMeta(booking.hotelName);
+    if (hotel) return `${hotel.name} ราคาเริ่มต้น ${hotel.price.toLocaleString()} บาทต่อคืนค่ะ ${buildQuestion(booking)}`;
+    return "บอกชื่อโรงแรมที่สนใจก่อนนะคะ เดี๋ยวเช็กราคาเริ่มต้นให้ค่ะ";
+  }
+  if (intent === "hotel_question") {
+    const hotel = getHotelMeta(booking.hotelName);
+    if (hotel) return `${hotel.name} อยู่ที่${hotel.location} ราคาเริ่มต้น ${hotel.price.toLocaleString()} บาทต่อคืนค่ะ ${buildQuestion(booking)}`;
+    return buildQuestion(booking);
+  }
+  if (intent === "off_topic") return `ขออนุญาตกลับมาที่การจองนะคะ ตอนนี้ขาด${fieldLabel(missingField)}ค่ะ`;
+  if (savedBooking) return `จองเรียบร้อยค่ะ หมายเลขการจอง ${savedBooking.id}`;
+  if (missingField) return buildQuestion(booking);
+  return buildSummary(booking);
+}
+
+async function generateBookingReply({ intent, booking, missingField, savedBooking, message }) {
+  const fallback = buildDeterministicBookingReply({ intent, booking, missingField, savedBooking });
+  if (aiMode === "rule-based" || savedBooking) return fallback;
+
+  const prompt = `คุณคือพนักงานจองโรงแรมภาษาไทย ตอบสั้น เป็นธรรมชาติ และลงท้าย "ค่ะ"
+ห้ามเปลี่ยนสถานะหรือแต่งข้อมูลใหม่ ให้ใช้ข้อมูลที่ส่งให้เท่านั้น
+
+intent: ${intent}
+missingField: ${missingField || ""}
+booking: ${JSON.stringify(booking)}
+customerMessage: "${message}"
+fallbackReply: "${fallback}"
+
+กฎ:
+- ถ้ามี missingField ให้ถามเฉพาะ field นั้นเท่านั้น
+- ถ้าข้อมูลครบ ให้สรุปสั้นและถามยืนยัน
+- ถ้าลูกค้าถามนอกเรื่อง ให้พากลับมาที่การจอง
+- ตอบไม่เกิน 2 ประโยค`;
+
+  const reply = await generateAiText(prompt);
+  return reply || fallback;
+}
+
+async function sendBookingResponse(res, { stream, reply, booking, saved = false, meta = {} }) {
+  if (stream) {
+    res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" });
+    for (const chunk of reply.split("")) {
+      res.write(`data: ${JSON.stringify({ text: chunk })}\n\n`);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    res.write(`data: ${JSON.stringify({ done: true, saved, booking, ...meta })}\n\n`);
+    res.end();
+    return;
+  }
+
+  sendJson(res, 200, { reply, booking, saved, ...meta });
+}
+
 
 // ─── Botnoi TTS ───────────────────────────────────────────────────────────────
 
@@ -607,7 +874,7 @@ async function handleHotelRecommendation(req, res) {
   });
 }
 
-async function handleAiBooking(req, res, options = {}) {
+async function handleAiBookingLegacy(req, res, options = {}) {
   const { stream = false } = options;
   const { message = "", sessionId = "default", hotelName = "" } = await parseBody(req);
   const currentBooking = { ...(sessions.get(sessionId) ?? emptyBooking()) };
@@ -712,6 +979,124 @@ const replyText = aiSummary || buildSummary(awaitingBooking); // fallback ถ้
   }
 
   sendJson(res, 200, { reply: replyText, booking: awaitingBooking, saved: false, extractionSource });
+}
+
+async function handleAiBooking(req, res, options = {}) {
+  const { stream = false } = options;
+  const { message = "", sessionId = "default", hotelName = "" } = await parseBody(req);
+  const currentBooking = { ...(sessions.get(sessionId) ?? emptyBooking()) };
+
+  if (hotelName && !currentBooking.hotelName) currentBooking.hotelName = String(hotelName);
+
+  const normalizedMessage = String(message).trim();
+  if (!normalizedMessage) { sendJson(res, 400, { error: "message is required" }); return; }
+
+  const extraction = await extractBookingIntent(normalizedMessage, currentBooking);
+  let { intent, booking, corrections, confidence, source: extractionSource } = extraction;
+
+  if (intent === "restart") {
+    const resetBooking = hotelName ? { ...emptyBooking(), hotelName: String(hotelName) } : emptyBooking();
+    sessions.set(sessionId, resetBooking);
+    const missingField = getMissingField(resetBooking);
+    const reply = await generateBookingReply({ intent, booking: resetBooking, missingField, message: normalizedMessage });
+    await sendBookingResponse(res, {
+      stream,
+      reply,
+      booking: resetBooking,
+      meta: { intent, missingField, confidence, needsConfirmation: false, corrections, extractionSource },
+    });
+    return;
+  }
+
+  if (intent === "cancel") {
+    const cancelledBooking = { ...emptyBooking(), status: "cancelled" };
+    sessions.set(sessionId, emptyBooking());
+    const reply = await generateBookingReply({ intent, booking: cancelledBooking, missingField: "", message: normalizedMessage });
+    await sendBookingResponse(res, {
+      stream,
+      reply,
+      booking: cancelledBooking,
+      meta: { intent, missingField: "", confidence, needsConfirmation: false, corrections, extractionSource },
+    });
+    return;
+  }
+
+  if (currentBooking.status === "awaiting_confirmation" && intent === "confirm") {
+    const missingBeforeSave = getMissingField(currentBooking);
+    if (missingBeforeSave) {
+      booking = { ...currentBooking, status: "collecting" };
+      sessions.set(sessionId, booking);
+      const reply = await generateBookingReply({
+        intent: "provide_info",
+        booking,
+        missingField: missingBeforeSave,
+        message: normalizedMessage,
+      });
+      await sendBookingResponse(res, {
+        stream,
+        reply,
+        booking,
+        meta: {
+          intent: "provide_info",
+          missingField: missingBeforeSave,
+          confidence,
+          needsConfirmation: false,
+          corrections,
+          extractionSource,
+        },
+      });
+      return;
+    }
+
+    const savedBooking = await saveBooking(currentBooking);
+    sessions.set(sessionId, emptyBooking());
+    const reply = await generateBookingReply({
+      intent,
+      booking: savedBooking,
+      missingField: "",
+      savedBooking,
+      message: normalizedMessage,
+    });
+    await sendBookingResponse(res, {
+      stream,
+      reply,
+      booking: savedBooking,
+      saved: true,
+      meta: { intent, missingField: "", confidence, needsConfirmation: false, corrections, extractionSource },
+    });
+    return;
+  }
+
+  if (currentBooking.status === "awaiting_confirmation" && intent === "provide_info" && !corrections.length) {
+    intent = "off_topic";
+    booking = { ...currentBooking };
+  }
+
+  const missingField = getMissingField(booking);
+
+  if (missingField) {
+    const collectingBooking = { ...booking, status: "collecting" };
+    sessions.set(sessionId, collectingBooking);
+    const reply = await generateBookingReply({ intent, booking: collectingBooking, missingField, message: normalizedMessage });
+    await sendBookingResponse(res, {
+      stream,
+      reply,
+      booking: collectingBooking,
+      meta: { intent, missingField, confidence, needsConfirmation: false, corrections, extractionSource },
+    });
+    return;
+  }
+
+  const awaitingBooking = { ...booking, status: "awaiting_confirmation" };
+  sessions.set(sessionId, awaitingBooking);
+  const reply = await generateBookingReply({ intent, booking: awaitingBooking, missingField: "", message: normalizedMessage });
+
+  await sendBookingResponse(res, {
+    stream,
+    reply,
+    booking: awaitingBooking,
+    meta: { intent, missingField: "", confidence, needsConfirmation: true, corrections, extractionSource },
+  });
 }
 
 async function handleAiBookingStream(req, res) {
