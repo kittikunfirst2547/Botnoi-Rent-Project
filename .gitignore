@@ -5,3 +5,8 @@ dist/
 server/data/bookings.json
 server/data/bookings.sqlite
 server/data/bookings.sqlite-*
+backend/src/data/bookings.json
+backend/src/data/bookings.sqlite
+backend/src/data/bookings.sqlite-*
+backend/src/data/users.json
+backend/src/data/payments.json

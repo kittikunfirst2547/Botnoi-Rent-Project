@@ -106,5 +106,45 @@
     "phone": "0862345232",
     "status": "confirmed",
     "createdAt": "2026-05-14T09:30:23.922Z"
+  },
+  {
+    "id": "23576",
+    "hotelName": "Amanpuri Phuket",
+    "location": "",
+    "checkIn": "2026-02-12",
+    "checkOut": "2026-02-14",
+    "guests": 5,
+    "customerName": "ณเดช",
+    "phone": "0982345678",
+    "status": "confirmed",
+    "createdAt": "2026-05-19T07:17:49.603Z"
+  },
+  {
+    "id": "95743",
+    "userId": "usr_e64d9d6ecef34daf352cca5e",
+    "hotelName": "Anantara Siam Resort & Spa",
+    "location": "กรุงเทพ",
+    "checkIn": "2026-01-15",
+    "checkOut": "2026-02-04",
+    "guests": 2,
+    "customerName": "firsty",
+    "email": "first1kittikun@gmail.com",
+    "phone": "0954323261",
+    "status": "confirmed",
+    "createdAt": "2026-05-19T08:46:28.721Z"
+  },
+  {
+    "id": "76680",
+    "userId": "usr_e64d9d6ecef34daf352cca5e",
+    "hotelName": "Rayavadee Krabi",
+    "location": "กระบี่",
+    "checkIn": "2026-05-22",
+    "checkOut": "2026-05-23",
+    "guests": 2,
+    "customerName": "กิตติคุณ",
+    "email": "first1kittikun@gmail.com",
+    "phone": "0902282073",
+    "status": "confirmed",
+    "createdAt": "2026-05-19T09:35:29.597Z"
   }
 ]

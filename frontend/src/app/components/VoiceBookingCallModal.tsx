@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
 import { Loader2, Mic, MicOff, Minus, PhoneOff, Send, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 
-const API = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '')
+const API = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') ?? "";
 
 type SpeechRecognitionConstructor = new () => SpeechRecognition;
 
@@ -36,6 +36,7 @@ interface VoiceBookingCallModalProps {
   hotelName: string;
   price: number;
   onClose: () => void;
+  onPaymentRequired?: (booking: NonNullable<VoiceBookingResponse["booking"]>) => void;
 }
 
 interface ConversationMessage {
@@ -47,6 +48,7 @@ interface ConversationMessage {
 interface VoiceBookingResponse {
   reply: string;
   saved: boolean;
+  needsPayment?: boolean;
   booking?: {
     hotelName: string;
     location: string;
@@ -89,12 +91,12 @@ const createId = () => {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
-export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: VoiceBookingCallModalProps) {
+export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose, onPaymentRequired }: VoiceBookingCallModalProps) {
   const [messages, setMessages] = useState<ConversationMessage[]>([
     {
       id: "welcome",
       sender: "ai",
-      text: `สวัสดีค่ะ กำลังจอง ${hotelName} ให้คุณอยู่ บอกวันเช็คอิน เช็คเอาท์ จำนวนผู้เข้าพัก ชื่อ และเบอร์โทรได้เลยค่ะ`,
+      text: `สวัสดีค่ะ กำลังจอง ${hotelName} ให้คุณอยู่ บอกวันเช็คอิน เช็คเอาท์ จำนวนผู้เข้าพัก และชื่อผู้จองได้เลยค่ะ`,
     },
   ]);
   const [manualText, setManualText] = useState("");
@@ -108,15 +110,24 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
   const handledSpeechErrorRef = useRef(false);
   const autoRestartRef = useRef(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const sessionId = useMemo(() => createId(), []);
+  const [sessionId, setSessionId] = useState(() => createId());
 
   const addMessage = (sender: ConversationMessage["sender"], text: string) => {
     setMessages((current) => [...current, { id: createId(), sender, text }]);
   };
 
+  const stopMicAfterConfirmation = () => {
+    autoRestartRef.current = false;
+    keepListeningRef.current = false;
+    recognitionRef.current?.stop();
+    setIsListening(false);
+    setCallStatus("ปิดไมค์แล้ว");
+  };
+
   // Auto-start listening when modal opens
   useEffect(() => {
     if (isOpen && !isSpeechUnavailable) {
+      setSessionId(createId());
       const timer = setTimeout(() => {
         startListening();
       }, 1000); // Delay 1 second after modal opens
@@ -203,7 +214,7 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
   setIsSending(true);
   setCallStatus("AI กำลังคิด...");
 
-  // ✅ สร้าง id ก่อน แล้วเพิ่ม message พร้อม id นั้นเลย
+  // Create the placeholder first so streamed chunks update the correct message.
   const aiMessageId = createId();
   setMessages((current) => [
     ...current,
@@ -225,6 +236,7 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
       let fullText = "";
       let isDone = false;
       let savedStatus = false;
+      let paymentRequiredBooking: VoiceBookingResponse["booking"] | null = null;
 
       while (reader && !isDone) {
         const { done, value } = await reader.read();
@@ -240,11 +252,13 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
                 text?: string;
                 done?: boolean;
                 saved?: boolean;
+                needsPayment?: boolean;
+                booking?: VoiceBookingResponse["booking"];
               };
 
               if (data.text) {
                 fullText += data.text;
-                // ✅ update ถูก message เพราะ id ตรงกัน
+                // Update the matching placeholder message.
                 setMessages((current) =>
                   current.map((msg) =>
                     msg.id === aiMessageId ? { ...msg, text: fullText } : msg
@@ -255,12 +269,25 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
               if (data.done) {
                 isDone = true;
                 savedStatus = data.saved ?? false;
+                if (data.needsPayment && data.booking) {
+                  paymentRequiredBooking = data.booking;
+                }
               }
             } catch {
               // ignore
             }
           }
         }
+      }
+
+      if (paymentRequiredBooking) {
+        stopMicAfterConfirmation();
+        if (fullText) speak(fullText);
+        setTimeout(() => {
+          onPaymentRequired?.(paymentRequiredBooking!);
+          onClose();
+        }, 1800);
+        return;
       }
 
       if (fullText) speak(fullText);
@@ -284,6 +311,14 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
       );
 
       speak(data.reply);
+      if (data.needsPayment && data.booking) {
+        stopMicAfterConfirmation();
+        setTimeout(() => {
+          onPaymentRequired?.(data.booking!);
+          onClose();
+        }, 1800);
+        return;
+      }
       setCallStatus(data.saved ? "จองสำเร็จ ✓" : "กำลังคุยอยู่");
     }
 
@@ -398,7 +433,7 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
       {
         id: "welcome",
         sender: "ai",
-        text: `สวัสดีค่ะ กำลังจอง ${hotelName} ให้คุณอยู่ บอกวันเช็คอิน เช็คเอาท์ จำนวนผู้เข้าพัก ชื่อ และเบอร์โทรได้เลยค่ะ`,
+        text: `สวัสดีค่ะ กำลังจอง ${hotelName} ให้คุณอยู่ บอกวันเช็คอิน เช็คเอาท์ จำนวนผู้เข้าพัก และชื่อผู้จองได้เลยค่ะ`,
       },
     ]);
     setManualText("");
@@ -578,3 +613,4 @@ export function VoiceBookingCallModal({ isOpen, hotelName, price, onClose }: Voi
     </AnimatePresence>
   );
 }
+

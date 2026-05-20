@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { existsSync, readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { randomInt } from "node:crypto";
+import { createHmac, randomBytes, randomInt, scryptSync, timingSafeEqual } from "node:crypto";
 import cors from "cors";
 import express from "express";
 
@@ -12,6 +12,8 @@ const rootDir = join(__dirname, "..");
 const dataDir = join(rootDir, "src", "data");
 const bookingsFile = join(dataDir, "bookings.json");
 const bookingsSqliteFile = join(dataDir, "bookings.sqlite");
+const usersFile = join(dataDir, "users.json");
+const paymentsFile = join(dataDir, "payments.json");
 let bookingsDb;
 const sessions = new Map();
 
@@ -395,6 +397,16 @@ async function ensureDatabase() {
   } catch {
     await writeFile(bookingsFile, "[]\n", "utf8");
   }
+  try {
+    await readFile(usersFile, "utf8");
+  } catch {
+    await writeFile(usersFile, "[]\n", "utf8");
+  }
+  try {
+    await readFile(paymentsFile, "utf8");
+  } catch {
+    await writeFile(paymentsFile, "[]\n", "utf8");
+  }
 
   if (!bookingsDb) {
     bookingsDb = new DatabaseSync(bookingsSqliteFile);
@@ -424,6 +436,305 @@ function generateBookingId(bookings) {
   }
 
   throw new Error("Unable to generate a unique booking id");
+}
+
+function generateReceiptId() {
+  return `RCPT-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${randomInt(10000, 100000)}`;
+}
+
+async function readJsonArray(file) {
+  await ensureDatabase();
+  const parsed = JSON.parse(await readFile(file, "utf8"));
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && typeof parsed === "object") return [parsed];
+  return [];
+}
+
+async function writeJsonArray(file, rows) {
+  await writeFile(file, `${JSON.stringify(rows, null, 2)}\n`, "utf8");
+}
+
+function publicUser(user) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    phone: user.phone ?? "",
+    createdAt: user.createdAt,
+  };
+}
+
+function hashPassword(password, salt = randomBytes(16).toString("hex")) {
+  const hash = scryptSync(String(password), salt, 64).toString("hex");
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, storedHash) {
+  const [salt, hash] = String(storedHash ?? "").split(":");
+  if (!salt || !hash) return false;
+  const candidate = scryptSync(String(password), salt, 64);
+  const expected = Buffer.from(hash, "hex");
+  return expected.length === candidate.length && timingSafeEqual(candidate, expected);
+}
+
+function createAuthToken(user) {
+  const payload = Buffer.from(JSON.stringify({
+    userId: user.id,
+    exp: Date.now() + 1000 * 60 * 60 * 24 * 7,
+    nonce: randomBytes(8).toString("hex"),
+  })).toString("base64url");
+  const secret = process.env.AUTH_SECRET || process.env.BOTNOI_TOKEN || "javis-dev-secret";
+  const signature = createHmac("sha256", secret).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+function getBearerToken(req) {
+  const auth = req.headers.authorization ?? "";
+  const match = String(auth).match(/^Bearer\s+(.+)$/i);
+  return match?.[1] ?? "";
+}
+
+async function getAuthUser(req) {
+  const token = getBearerToken(req);
+  const [payload, signature] = token.split(".");
+  if (!payload || !signature) return null;
+  const secret = process.env.AUTH_SECRET || process.env.BOTNOI_TOKEN || "javis-dev-secret";
+  const expected = createHmac("sha256", secret).update(payload).digest("base64url");
+  const provided = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+  if (provided.length !== expectedBuffer.length || !timingSafeEqual(provided, expectedBuffer)) return null;
+  const session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+  if (!session.userId || Date.now() > Number(session.exp)) return null;
+  const users = await readJsonArray(usersFile);
+  return users.find((user) => user.id === session.userId) ?? null;
+}
+
+function validateEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email ?? "").trim());
+}
+
+function isValidIsoDate(date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date ?? ""))) return false;
+  const parsed = new Date(`${date}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date;
+}
+
+function isCheckOutAfterCheckIn(checkIn, checkOut) {
+  if (!checkIn || !checkOut || !isValidIsoDate(checkIn) || !isValidIsoDate(checkOut)) return true;
+  return new Date(checkOut) > new Date(checkIn);
+}
+
+function getHotelMeta(name) {
+  return hotelCatalog.find((hotel) => hotel.name.toLowerCase() === String(name ?? "").toLowerCase()) ?? null;
+}
+
+function parseStableDate(text, fallbackYear = new Date().getFullYear()) {
+  const normalized = normalizeThaiDigits(String(text ?? ""));
+  const isoMatch = normalized.match(/(20\d{2})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (isoMatch) return `${isoMatch[1]}-${isoMatch[2].padStart(2, "0")}-${isoMatch[3].padStart(2, "0")}`;
+
+  const months = [
+    ["\u0e21\u0e01\u0e23\u0e32\u0e04\u0e21", "\u0e21.\u0e04.", "jan", "january"],
+    ["\u0e01\u0e38\u0e21\u0e20\u0e32\u0e1e\u0e31\u0e19\u0e18\u0e4c", "\u0e01.\u0e1e.", "feb", "february"],
+    ["\u0e21\u0e35\u0e19\u0e32\u0e04\u0e21", "\u0e21\u0e35.\u0e04.", "mar", "march"],
+    ["\u0e40\u0e21\u0e29\u0e32\u0e22\u0e19", "\u0e40\u0e21.\u0e22.", "apr", "april"],
+    ["\u0e1e\u0e24\u0e29\u0e20\u0e32\u0e04\u0e21", "\u0e1e.\u0e04.", "may"],
+    ["\u0e21\u0e34\u0e16\u0e38\u0e19\u0e32\u0e22\u0e19", "\u0e21\u0e34.\u0e22.", "jun", "june"],
+    ["\u0e01\u0e23\u0e01\u0e0e\u0e32\u0e04\u0e21", "\u0e01.\u0e04.", "jul", "july"],
+    ["\u0e2a\u0e34\u0e07\u0e2b\u0e32\u0e04\u0e21", "\u0e2a.\u0e04.", "aug", "august"],
+    ["\u0e01\u0e31\u0e19\u0e22\u0e32\u0e22\u0e19", "\u0e01.\u0e22.", "sep", "september"],
+    ["\u0e15\u0e38\u0e25\u0e32\u0e04\u0e21", "\u0e15.\u0e04.", "oct", "october"],
+    ["\u0e1e\u0e24\u0e28\u0e08\u0e34\u0e01\u0e32\u0e22\u0e19", "\u0e1e.\u0e22.", "nov", "november"],
+    ["\u0e18\u0e31\u0e19\u0e27\u0e32\u0e04\u0e21", "\u0e18.\u0e04.", "dec", "december"],
+  ];
+
+  for (let index = 0; index < months.length; index += 1) {
+    for (const monthName of months[index]) {
+      const escapedMonth = monthName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const dayMatch = normalized.match(new RegExp(`(\\d{1,2})\\s*(?:${escapedMonth})`, "i"));
+      if (dayMatch) return `${fallbackYear}-${String(index + 1).padStart(2, "0")}-${dayMatch[1].padStart(2, "0")}`;
+    }
+  }
+
+  return "";
+}
+
+function enhanceBookingFromMessage(message, booking) {
+  const text = normalizeThaiDigits(String(message ?? "").trim());
+  const enhanced = { ...booking };
+  const lowerText = text.toLowerCase();
+
+  const matchedHotel = hotels.find((hotel) => lowerText.includes(hotel.toLowerCase()));
+  if (matchedHotel) enhanced.hotelName = matchedHotel;
+
+  const isoDates = [...text.matchAll(/20\d{2}[-/]\d{1,2}[-/]\d{1,2}/g)].map((match) => parseStableDate(match[0])).filter(Boolean);
+  if (isoDates.length >= 2) {
+    enhanced.checkIn = isoDates[0];
+    enhanced.checkOut = isoDates[1];
+  } else if (isoDates.length === 1) {
+    if (!enhanced.checkIn) enhanced.checkIn = isoDates[0];
+    else if (!enhanced.checkOut) enhanced.checkOut = isoDates[0];
+  }
+
+  const thaiRange = text.match(/(\d{1,2})\s*([ก-๙A-Za-z.]+)\s*(?:ถึง|จนถึง|to|-)\s*(\d{1,2})\s*([ก-๙A-Za-z.]*)/i);
+  if (isoDates.length < 2 && thaiRange) {
+    const firstMonth = thaiRange[2];
+    const secondMonth = thaiRange[4] || firstMonth;
+    const checkIn = parseStableDate(`${thaiRange[1]} ${firstMonth}`);
+    const checkOut = parseStableDate(`${thaiRange[3]} ${secondMonth}`);
+    if (checkIn) enhanced.checkIn = checkIn;
+    if (checkOut) enhanced.checkOut = checkOut;
+  }
+
+  const guestsMatch = text.match(/(\d{1,2})\s*(?:คน|ท่าน|guest|guests)/i);
+  if (guestsMatch) enhanced.guests = Number(guestsMatch[1]);
+
+  const phoneMatch = text.match(/0\d[\d\s-]{7,12}\d/);
+  if (phoneMatch) enhanced.phone = phoneMatch[0].replace(/\D/g, "");
+
+  const nameMatch = text.match(/(?:ชื่อ|ผมชื่อ|ฉันชื่อ|ดิฉันชื่อ|หนูชื่อ|ผู้จองชื่อ|จองในชื่อ|เรียกว่า)\s*([ก-๙A-Za-z][ก-๙A-Za-z\s.'-]{1,39})(?:\s+เบอร์|\s+โทร|\s+พัก|\s+เช็ค|\s+วันที่|\s*$)/);
+  if (nameMatch) enhanced.customerName = nameMatch[1].trim();
+  else if (!enhanced.customerName && getMissingField(booking) === "customerName" && looksLikePlainCustomerName(text)) {
+    enhanced.customerName = text;
+  }
+
+  return enhanced;
+}
+
+function calculateNights(checkIn, checkOut) {
+  const start = new Date(`${checkIn}T00:00:00.000Z`);
+  const end = new Date(`${checkOut}T00:00:00.000Z`);
+  const nights = Math.round((end.getTime() - start.getTime()) / 86400000);
+  return Number.isFinite(nights) && nights > 0 ? nights : 1;
+}
+
+function buildReceipt({ receiptId, booking, payment }) {
+  const nights = calculateNights(booking.checkIn, booking.checkOut);
+  return {
+    id: receiptId,
+    bookingId: booking.id,
+    paymentId: payment.id,
+    hotelName: booking.hotelName,
+    customerName: booking.customerName,
+    email: booking.email,
+    phone: booking.phone,
+    checkIn: booking.checkIn,
+    checkOut: booking.checkOut,
+    guests: booking.guests,
+    nights,
+    amount: payment.amount,
+    currency: payment.currency,
+    status: payment.status,
+    issuedAt: payment.createdAt,
+  };
+}
+
+function receiptText(receipt) {
+  return [
+    "Javis booking receipt",
+    `Receipt: ${receipt.id}`,
+    `Booking: ${receipt.bookingId}`,
+    `Hotel: ${receipt.hotelName}`,
+    `Guest: ${receipt.customerName}`,
+    `Stay: ${receipt.checkIn} to ${receipt.checkOut} (${receipt.nights} night${receipt.nights > 1 ? "s" : ""})`,
+    `Guests: ${receipt.guests}`,
+    `Paid: ${receipt.currency} ${Number(receipt.amount).toLocaleString()}`,
+    `Status: ${receipt.status}`,
+  ].join("\n");
+}
+
+function getEmailAddress(value) {
+  const text = String(value ?? "").trim();
+  const bracketMatch = text.match(/<([^>]+)>/);
+  return (bracketMatch?.[1] ?? text).trim().toLowerCase();
+}
+
+function isPublicEmailDomain(domain) {
+  return new Set([
+    "gmail.com",
+    "googlemail.com",
+    "hotmail.com",
+    "live.com",
+    "outlook.com",
+    "yahoo.com",
+    "icloud.com",
+    "me.com",
+    "msn.com",
+  ]).has(String(domain ?? "").toLowerCase());
+}
+
+function resolveReceiptSender() {
+  const fallback = "Javis <onboarding@resend.dev>";
+  const configured = process.env.RECEIPT_FROM_EMAIL?.trim() || fallback;
+  const email = getEmailAddress(configured);
+  const domain = email.split("@").pop() ?? "";
+
+  if (isPublicEmailDomain(domain)) {
+    return {
+      from: fallback,
+      warning: `RECEIPT_FROM_EMAIL uses ${domain}, which Resend cannot send from unless that domain is verified. Falling back to onboarding@resend.dev.`,
+    };
+  }
+
+  return { from: configured, warning: "" };
+}
+
+function getResendErrorMessage(data) {
+  return data?.message || data?.error?.message || data?.name || "email request failed";
+}
+
+async function sendReceiptEmail(receipt) {
+  const apiKey = process.env.RESEND_API_KEY ?? "";
+  const { from, warning } = resolveReceiptSender();
+  if (!apiKey || !receipt.email) {
+    return {
+      sent: false,
+      provider: "resend",
+      reason: !apiKey ? "RESEND_API_KEY is missing" : "receipt email is missing",
+      ...(warning ? { warning } : {}),
+    };
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Number(process.env.EMAIL_TIMEOUT_MS ?? 10000));
+
+  try {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from,
+        to: [receipt.email],
+        subject: `Javis booking receipt ${receipt.bookingId}`,
+        text: receiptText(receipt),
+      }),
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return {
+        sent: false,
+        provider: "resend",
+        reason: getResendErrorMessage(data),
+        status: response.status,
+        ...(warning ? { warning } : {}),
+      };
+    }
+    return { sent: true, provider: "resend", id: data?.id ?? "", ...(warning ? { warning } : {}) };
+  } catch (err) {
+    return {
+      sent: false,
+      provider: "resend",
+      reason: err?.name === "AbortError" ? "email request timed out" : `email request failed: ${err.message}`,
+      ...(warning ? { warning } : {}),
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function saveBooking(booking) {
@@ -568,7 +879,6 @@ function getMissingField(booking) {
   if (!booking.checkOut) return "checkOut";
   if (!booking.guests) return "guests";
   if (!booking.customerName) return "customerName";
-  if (!booking.phone) return "phone";
   return "";
 }
 
@@ -580,14 +890,13 @@ function buildQuestion(booking) {
     checkOut: "แล้วเช็คเอาท์วันไหนคะ",
     guests: "เข้าพักกี่ท่านคะ",
     customerName: "ขอชื่อผู้จองด้วยค่ะ",
-    phone: "ขอเบอร์โทรสำหรับยืนยันการจองค่ะ",
   };
   return questions[missingField] ?? "";
 }
 
 function buildSummary(booking) {
   const destination = booking.hotelName || `โรงแรมใน${booking.location}`;
-  return `สรุปการจอง ${destination} เช็คอิน ${booking.checkIn} เช็คเอาท์ ${booking.checkOut} พัก ${booking.guests} ท่าน ชื่อผู้จอง ${booking.customerName} เบอร์ ${booking.phone} ยืนยันการจองไหมคะ`;
+  return `สรุปการจอง ${destination} เช็คอิน ${booking.checkIn} เช็คเอาท์ ${booking.checkOut} พัก ${booking.guests} ท่าน ชื่อผู้จอง ${booking.customerName} ยืนยันการจองไหมคะ`;
 }
 
 function getRecommendationSignals(text) {
@@ -779,6 +1088,117 @@ app.get("/api/health", async (req, res) => {
   });
 });
 
+app.post("/api/auth/register", async (req, res) => {
+  const { name = "", email = "", password = "", phone = "" } = req.body;
+  const normalizedEmail = String(email).trim().toLowerCase();
+  const normalizedName = String(name).trim();
+
+  if (!normalizedName || !validateEmail(normalizedEmail) || String(password).length < 6) {
+    return res.status(400).json({ error: "name, valid email, and password with at least 6 characters are required" });
+  }
+
+  const users = await readJsonArray(usersFile);
+  if (users.some((user) => user.email === normalizedEmail)) {
+    return res.status(409).json({ error: "email already registered" });
+  }
+
+  const user = {
+    id: `usr_${randomBytes(12).toString("hex")}`,
+    name: normalizedName,
+    email: normalizedEmail,
+    phone: String(phone).trim(),
+    passwordHash: hashPassword(password),
+    createdAt: new Date().toISOString(),
+  };
+  users.push(user);
+  await writeJsonArray(usersFile, users);
+
+  const token = createAuthToken(user);
+  res.status(201).json({ token, user: publicUser(user) });
+});
+
+app.post("/api/auth/login", async (req, res) => {
+  const { email = "", password = "" } = req.body;
+  const normalizedEmail = String(email).trim().toLowerCase();
+  const users = await readJsonArray(usersFile);
+  const user = users.find((row) => row.email === normalizedEmail);
+
+  if (!user || !verifyPassword(password, user.passwordHash)) {
+    return res.status(401).json({ error: "invalid email or password" });
+  }
+
+  const token = createAuthToken(user);
+  res.json({ token, user: publicUser(user) });
+});
+
+app.get("/api/auth/me", async (req, res) => {
+  const user = await getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "unauthorized" });
+  res.json({ user: publicUser(user) });
+});
+
+app.post("/api/payments/checkout", async (req, res) => {
+  const user = await getAuthUser(req);
+  if (!user) return res.status(401).json({ error: "login required before payment" });
+
+  const { booking = {}, payment = {} } = req.body;
+  const hotel = getHotelMeta(booking.hotelName);
+  const checkIn = String(booking.checkIn ?? "");
+  const checkOut = String(booking.checkOut ?? "");
+  const guests = Number(booking.guests ?? 0);
+  const email = String(booking.email || user.email).trim().toLowerCase();
+  const phone = String(booking.phone || user.phone || "").replace(/\D/g, "");
+  const customerName = String(booking.customerName || booking.name || user.name).trim();
+
+  if (!hotel || !isValidIsoDate(checkIn) || !isValidIsoDate(checkOut) || !isCheckOutAfterCheckIn(checkIn, checkOut) || !guests || !customerName || !validateEmail(email)) {
+    return res.status(400).json({ error: "complete booking details are required before payment" });
+  }
+
+  const nights = calculateNights(checkIn, checkOut);
+  const amount = hotel.price * nights;
+  const cardLast4 = String(payment.cardNumber ?? "").replace(/\D/g, "").slice(-4);
+  const paidAt = new Date().toISOString();
+  const savedBooking = await saveBooking({
+    userId: user.id,
+    hotelName: hotel.name,
+    location: hotel.province,
+    checkIn,
+    checkOut,
+    guests,
+    customerName,
+    email,
+    phone,
+  });
+
+  const paymentRecord = {
+    id: `pay_${randomBytes(10).toString("hex")}`,
+    bookingId: savedBooking.id,
+    userId: user.id,
+    amount,
+    currency: "THB",
+    method: payment.method ?? "card",
+    reference: payment.reference ?? "",
+    cardLast4,
+    status: "paid",
+    createdAt: paidAt,
+  };
+  const payments = await readJsonArray(paymentsFile);
+  payments.push(paymentRecord);
+  await writeJsonArray(paymentsFile, payments);
+
+  const receipt = buildReceipt({ receiptId: generateReceiptId(), booking: savedBooking, payment: paymentRecord });
+  const emailResult = await sendReceiptEmail(receipt);
+
+  res.json({
+    saved: true,
+    booking: savedBooking,
+    payment: paymentRecord,
+    receipt,
+    email: emailResult,
+    reply: `Booking confirmed. Booking number ${savedBooking.id}. Receipt ${receipt.id}${emailResult.sent ? " was emailed." : " is ready."}`,
+  });
+});
+
 // Hotel recommendation
 app.post("/api/ai/hotel-recommendation", async (req, res) => {
   const { message = "" } = req.body;
@@ -848,16 +1268,17 @@ app.post("/api/ai/booking", async (req, res) => {
   }
 
   if (currentBooking.status === "awaiting_confirmation" && /^(ยืนยัน|ตกลง|confirm|ok|โอเค)/i.test(normalizedMessage)) {
-    const savedBooking = await saveBooking(currentBooking);
+    const paymentBooking = { ...currentBooking, status: "payment_required" };
     sessions.set(sessionId, emptyBooking());
     return res.json({
-      reply: `จองเรียบร้อยค่ะ หมายเลขการจอง ${savedBooking.id}`,
-      booking: savedBooking,
-      saved: true,
+      reply: "ขอบคุณค่ะ ปิดไมค์แล้วนะคะ ขั้นตอนถัดไปคือสแกน QR เพื่อชำระเงินแบบ demo ค่ะ",
+      booking: paymentBooking,
+      saved: false,
+      needsPayment: true,
     });
   }
 
-  const ruleBasedBooking = extractBooking(normalizedMessage, currentBooking);
+  const ruleBasedBooking = enhanceBookingFromMessage(normalizedMessage, extractBooking(normalizedMessage, currentBooking));
   const shouldTryAiExtraction =
     activeAiMode !== "rule-based" &&
     (aiExtractionMode === "always" || getMissingField(ruleBasedBooking) === getMissingField(currentBooking));
@@ -913,21 +1334,21 @@ app.post("/api/ai/booking/stream", async (req, res) => {
   });
 
   if (currentBooking.status === "awaiting_confirmation" && /^(ยืนยัน|ตกลง|confirm|ok|โอเค)/i.test(normalizedMessage)) {
-    const savedBooking = await saveBooking(currentBooking);
+    const paymentBooking = { ...currentBooking, status: "payment_required" };
     sessions.set(sessionId, emptyBooking());
-    const reply = `จองเรียบร้อยค่ะ หมายเลขการจอง ${savedBooking.id}`;
+    const reply = "ขอบคุณค่ะ ปิดไมค์แล้วนะคะ ขั้นตอนถัดไปคือสแกน QR เพื่อชำระเงินแบบ demo ค่ะ";
     
     // Stream the confirmation
     for (const char of reply) {
       res.write(`data: ${JSON.stringify({ text: char })}\n\n`);
       await new Promise((resolve) => setTimeout(resolve, 30));
     }
-    res.write(`data: ${JSON.stringify({ done: true, saved: true, booking: savedBooking })}\n\n`);
+    res.write(`data: ${JSON.stringify({ done: true, saved: false, needsPayment: true, booking: paymentBooking })}\n\n`);
     res.end();
     return;
   }
 
-  const ruleBasedBooking = extractBooking(normalizedMessage, currentBooking);
+  const ruleBasedBooking = enhanceBookingFromMessage(normalizedMessage, extractBooking(normalizedMessage, currentBooking));
   const shouldTryAiExtraction =
     activeAiMode !== "rule-based" &&
     (aiExtractionMode === "always" || getMissingField(ruleBasedBooking) === getMissingField(currentBooking));

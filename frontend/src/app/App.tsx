@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useTheme } from "next-themes";
 import Link from "next/link";
-import { Sparkles, Sun, Moon, ArrowRight } from "lucide-react";
+import { Sparkles, Sun, Moon, ArrowRight, LogIn, LogOut, UserRound } from "lucide-react";
 import { motion } from "motion/react";
 
 import { hotels } from "../data/hotels";
@@ -14,6 +14,7 @@ import { BotnoiChat } from "./components/BotnoiChat";
 import { BookingChoiceModal } from "./components/BookingChoiceModal";
 import { TravelIdeaAssistant } from "./components/TravelIdeaAssistant";
 import { useVoiceBooking } from "../context/VoiceBookingContext";
+import { useAuth } from "../context/AuthContext";
 
 export default function App() {
   const [selectedHotel, setSelectedHotel] = useState<string | null>(null);
@@ -21,6 +22,7 @@ export default function App() {
   const [mounted, setMounted] = useState(false);
   const { resolvedTheme, setTheme } = useTheme();
   const { openVoiceBooking } = useVoiceBooking();
+  const { user, openAuthModal, logout } = useAuth();
 
   useEffect(() => {
     setMounted(true);
@@ -104,6 +106,28 @@ export default function App() {
               >
                 {resolvedTheme === "dark" ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
               </button>
+
+              {user ? (
+                <div className="hidden items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm text-[var(--foreground)] md:flex">
+                  <UserRound className="h-4 w-4 text-[var(--accent-brand)]" />
+                  <span className="max-w-28 truncate">{user.name}</span>
+                  <button
+                    onClick={logout}
+                    className="ml-1 rounded-lg p-1 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--muted)] hover:text-[var(--foreground)]"
+                    aria-label="Logout"
+                  >
+                    <LogOut className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => openAuthModal("login")}
+                  className="hidden items-center gap-2 rounded-xl bg-[var(--accent-brand)] px-4 py-2 text-sm font-medium text-white transition-all hover:bg-[var(--accent-brand-hover)] md:flex"
+                >
+                  <LogIn className="h-4 w-4" />
+                  Login
+                </button>
+              )}
             </div>
           </div>
         </div>
